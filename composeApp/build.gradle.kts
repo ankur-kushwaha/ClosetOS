@@ -31,6 +31,7 @@ kotlin {
                 implementation(compose.material3)
                 implementation(compose.ui)
                 implementation(compose.components.resources)
+                implementation(compose.materialIconsExtended)
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
             }
         }
@@ -81,3 +82,32 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
+
+val wasmJsCopySkiko = tasks.register("wasmJsCopySkiko") {
+    doLast {
+        val expandedDir = rootProject.file(".gradle/expanded")
+        val targetDir = rootProject.layout.buildDirectory.dir("js/packages/composeApp/kotlin").get().asFile
+        targetDir.mkdirs()
+        expandedDir.listFiles()?.forEach { dir ->
+            if (dir.isDirectory) {
+                val mjsFile = dir.resolve("skiko.mjs")
+                val wasmFile = dir.resolve("skiko.wasm")
+                if (mjsFile.exists()) {
+                    println("[DEBUG] Copying skiko.mjs to ${targetDir.absolutePath}")
+                    mjsFile.copyTo(targetDir.resolve("skiko.mjs"), overwrite = true)
+                }
+                if (wasmFile.exists()) {
+                    println("[DEBUG] Copying skiko.wasm to ${targetDir.absolutePath}")
+                    wasmFile.copyTo(targetDir.resolve("skiko.wasm"), overwrite = true)
+                }
+            }
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == "wasmJsBrowserDevelopmentWebpack" || name == "wasmJsBrowserProductionWebpack" || name == "wasmJsBrowserTest") {
+        dependsOn(wasmJsCopySkiko)
+    }
+}
+
