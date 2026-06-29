@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base application theme. -->
+    <style name="Theme.ClosetOS" parent="android:Theme.DeviceDefault.NoActionBar">
+        <!-- Customize your light theme here. -->
+        <item name="android:colorPrimary">@android:color/white</item>
+        <item name="android:statusBarColor">#0C0C0E</item>
+        <item name="android:navigationBarColor">#0C0C0E</item>
+    </style>
+</resources>

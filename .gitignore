@@ -1,0 +1,41 @@
+# Built artifacts and Gradle
+.gradle/
+build/
+app/build/
+
+# Local configuration file (contains SDK path, etc.)
+local.properties
+
+# Log Files
+*.log
+
+# Android Studio & IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+.navigation/
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# Visual Studio Code
+.vscode/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Keystore and Certificate files
+*.jks
+*.keystore
+!debug.keystore
+
+# External native build folder
+.externalNativeBuild/
+.cxx/
+
+# Google Services Configuration
+google-services.json
