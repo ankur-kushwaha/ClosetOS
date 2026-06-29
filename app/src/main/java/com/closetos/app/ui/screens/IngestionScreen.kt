@@ -6,6 +6,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import android.net.Uri
 import java.io.File
 import java.io.FileOutputStream
+import android.util.Base64
+import org.json.JSONObject
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -36,7 +45,11 @@ import com.closetos.app.data.repository.ClosetRepository
 import com.closetos.app.ui.components.ElegantButton
 import com.closetos.app.ui.components.GlassmorphicCard
 import com.closetos.app.ui.components.SectionHeader
+import com.closetos.app.ui.components.rememberImageBitmap
 import com.closetos.app.ui.theme.*
+import android.widget.Toast
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -169,96 +182,199 @@ private suspend fun simulateGarmentPipeline(item: IngestionItem, context: androi
     val id = item.id
     val filename = item.originalImageUrl
     
-    // Choose garment profile based on filename
-    val mockGarment = when {
-        filename.contains("tshirt") -> Garment(
-            category = "Top",
-            subcategory = "T-Shirt",
-            colorName = "Crimson Red",
-            labColor = floatArrayOf(45f, 60f, 30f),
-            material = "Organic Cotton",
-            pattern = "Plain",
-            fit = "Regular",
-            seasons = listOf("Summer", "Spring"),
-            formalityScore = 0.1f,
-            silhouette = "Relaxed",
-            price = 45.00,
-            brand = "A.P.C.",
-            imageUrl = "red_tshirt",
-            embedding = FloatArray(512).apply { this[100] = 0.3f; this[60] = 0.5f }
-        )
-        filename.contains("trousers") -> Garment(
-            category = "Bottom",
-            subcategory = "Pleated Trousers",
-            colorName = "Olive Khaki",
-            labColor = floatArrayOf(60f, -10f, 15f),
-            material = "Linen Wool",
-            pattern = "Plain",
-            fit = "Relaxed",
-            seasons = listOf("Spring", "Summer", "Autumn"),
-            formalityScore = 0.7f,
-            silhouette = "Wide-Leg",
-            price = 180.00,
-            brand = "Margaret Howell",
-            imageUrl = "olive_trousers",
-            embedding = FloatArray(512).apply { this[200] = 0.8f }
-        )
-        filename.contains("blazer") -> Garment(
-            category = "Outerwear",
-            subcategory = "Linen Blazer",
-            colorName = "Natural Oatmeal",
-            labColor = floatArrayOf(85f, 2f, 12f),
-            material = "Linen",
-            pattern = "Plain",
-            fit = "Tailored",
-            seasons = listOf("Summer", "Spring"),
-            formalityScore = 0.75f,
-            silhouette = "Single-breasted",
-            price = 320.00,
-            brand = "Loro Piana",
-            imageUrl = "oatmeal_blazer",
-            embedding = FloatArray(512).apply { this[300] = 0.8f; this[50] = 0.6f }
-        )
-        else -> Garment(
-            category = "Top",
-            subcategory = "Silk Blouse",
-            colorName = "Ivory Cream",
-            labColor = floatArrayOf(95f, 0f, 5f),
-            material = "Morus Silk",
-            pattern = "Plain",
-            fit = "Fluid",
-            seasons = listOf("Spring", "Summer"),
-            formalityScore = 0.8f,
-            silhouette = "Draped",
-            price = 240.00,
-            brand = "Equipment",
-            imageUrl = "cream_blouse",
-            embedding = FloatArray(512).apply { this[100] = 0.8f; this[30] = 0.8f }
-        )
-    }
-
-    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.PRE_FLIGHT, 0.15f, "Pre-flight: Checking size and exact duplicates...")
+    // Step 1: Pre-flight check
+    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.PRE_FLIGHT, 0.10f, "Pre-flight: Checking size and duplicate index...")
+    delay(800)
+    
+    // Step 2: Grounding DINO
+    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.GROUNDING_DINO, 0.25f, "Grounding DINO: Localizing garment bounding box...")
     delay(1000)
     
-    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.DETECTION, 0.35f, "GroundingDINO: Localizing boundaries...")
+    // Step 3: SAM2
+    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.SAM2, 0.40f, "SAM2: Generative mask segmentation...")
     delay(1200)
-
-    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.SEGMENTATION, 0.60f, "SAM2: Generating clean alpha-matte mask...")
-    delay(1500)
-
-    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.TAGGING, 0.80f, "Florence-2: Distilling category/brand attributes...")
-    delay(1200)
-
-    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.EMBEDDING, 0.95f, "FashionCLIP: Generating 512-dimension vector key...")
-    delay(900)
-
-    val adjustedGarment = if (filename.contains("/") || filename.contains(".")) {
-        mockGarment.copy(imageUrl = filename)
+    
+    // Step 4: Crop garment
+    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.CROP_GARMENT, 0.55f, "Crop Garment: Isolating item...")
+    
+    val backendGarment = uploadImageToBackend(context, filename)
+    
+    val finalGarment = if (backendGarment != null) {
+        // Step 5: FashionCLIP
+        ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.FASHION_CLIP, 0.70f, "FashionCLIP: Generating 512-dimension vector key...")
+        delay(1000)
+        
+        // Step 6: Florence-2
+        ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.FLORENCE_2, 0.85f, "Florence-2: Extracting rich metadata...")
+        delay(800)
+        
+        backendGarment
     } else {
-        mockGarment
+        // Fallback to local simulation when server is offline
+        withContext(Dispatchers.Main) {
+            Toast.makeText(context, "Backend server offline. Running local high-fidelity fallback.", Toast.LENGTH_LONG).show()
+        }
+        
+        // Run local crop
+        val isRealFile = filename.startsWith("/") || filename.contains(".")
+        val croppedPath = if (isRealFile) {
+            cropAndSegmentGarmentImage(context, filename)
+        } else {
+            filename
+        }
+        
+        // Step 5: FashionCLIP
+        ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.FASHION_CLIP, 0.70f, "FashionCLIP (Fallback): Generating vector key...")
+        delay(1000)
+        
+        // Step 6: Florence-2
+        ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.FLORENCE_2, 0.85f, "Florence-2 (Fallback): Extracting metadata...")
+        delay(800)
+        
+        // Match templates based on filename keyword
+        val template = garmentTemplates.firstOrNull {
+            filename.contains(it.subcategory.replace(" ", "").lowercase()) ||
+            filename.contains(it.category.lowercase()) ||
+            filename.contains(it.material.lowercase())
+        } ?: garmentTemplates.firstOrNull {
+            filename.contains("shirt") && it.category == "Top"
+        } ?: garmentTemplates.firstOrNull {
+            (filename.contains("pants") || filename.contains("trousers") || filename.contains("jeans")) && it.category == "Bottom"
+        } ?: garmentTemplates.firstOrNull {
+            (filename.contains("blazer") || filename.contains("jacket") || filename.contains("coat")) && it.category == "Outerwear"
+        } ?: garmentTemplates.firstOrNull {
+            (filename.contains("loafers") || filename.contains("sneakers") || filename.contains("shoes")) && it.category == "Shoes"
+        } ?: garmentTemplates[(id.hashCode() % garmentTemplates.size).let { if (it < 0) it + garmentTemplates.size else it }]
+        
+        var detectedColorName = "Classic Black"
+        var detectedLabColor = floatArrayOf(20f, 0f, 0f)
+        if (isRealFile) {
+            val avgColor = calculateAverageColor(croppedPath)
+            detectedColorName = getColorNameFromRgb(avgColor)
+            detectedLabColor = rgbToLab(avgColor)
+        }
+        
+        val embedding = FloatArray(512).apply {
+            for (i in indices) this[i] = (Math.random() * 0.05).toFloat()
+            this[template.category.hashCode().let { if (it < 0) -it else it } % 512] = 0.8f
+            this[template.subcategory.hashCode().let { if (it < 0) -it else it } % 512] = 0.6f
+            this[detectedColorName.hashCode().let { if (it < 0) -it else it } % 512] = 0.7f
+        }
+        
+        Garment(
+            category = template.category,
+            subcategory = template.subcategory,
+            colorName = detectedColorName,
+            labColor = detectedLabColor,
+            material = template.material,
+            pattern = template.pattern,
+            fit = template.fit,
+            seasons = template.seasons,
+            formalityScore = template.formalityScore,
+            silhouette = template.silhouette,
+            price = template.price,
+            brand = template.brand + " (Local Fallback)",
+            imageUrl = croppedPath,
+            embedding = embedding
+        )
     }
+    
+    // Complete
+    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.READY, 1.0f, "Ingestion Pipeline Completed!", finalGarment)
+}
 
-    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.READY, 1.0f, "Ingestion Pipeline Completed!", adjustedGarment)
+// --- BACKEND HTTP API UPLOADER ---
+private suspend fun uploadImageToBackend(context: android.content.Context, imagePath: String): Garment? {
+    return withContext(Dispatchers.IO) {
+        var connection: java.net.HttpURLConnection? = null
+        try {
+            val file = File(imagePath)
+            if (!file.exists()) return@withContext null
+
+            val url = java.net.URL("http://10.0.2.2:8000/digitize")
+            connection = url.openConnection() as java.net.HttpURLConnection
+            val boundary = "===Boundary-${System.currentTimeMillis()}==="
+            
+            connection.doOutput = true
+            connection.doInput = true
+            connection.useCaches = false
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 30000 // 30s timeout for ML model execution
+            connection.readTimeout = 60000
+            connection.setRequestProperty("Connection", "Keep-Alive")
+            connection.setRequestProperty("User-Agent", "Android Ingest")
+            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+
+            connection.outputStream.use { out ->
+                val writer = java.io.PrintWriter(java.io.OutputStreamWriter(out, "UTF-8"), true)
+                
+                // File part
+                writer.append("--$boundary").append("\r\n")
+                writer.append("Content-Disposition: form-data; name=\"file\"; filename=\"${file.name}\"").append("\r\n")
+                writer.append("Content-Type: image/jpeg").append("\r\n")
+                writer.append("\r\n").flush()
+
+                file.inputStream().use { input ->
+                    input.copyTo(out)
+                }
+                out.flush()
+                
+                writer.append("\r\n")
+                writer.append("--$boundary--").append("\r\n").flush()
+            }
+
+            val responseCode = connection.responseCode
+            if (responseCode == java.net.HttpURLConnection.HTTP_OK) {
+                val jsonResponse = connection.inputStream.bufferedReader().use { it.readText() }
+                val root = JSONObject(jsonResponse)
+                val base64Img = root.getString("image_base64")
+                val attr = root.getJSONObject("attributes")
+
+                // Decode base64 PNG and write to file
+                val pngBytes = Base64.decode(base64Img, Base64.DEFAULT)
+                val croppedFile = File(context.filesDir, "cropped_server_${System.currentTimeMillis()}.png")
+                FileOutputStream(croppedFile).use { fos ->
+                    fos.write(pngBytes)
+                }
+
+                // Parse embedding
+                val embedArray = attr.getJSONArray("embedding")
+                val embedding = FloatArray(512) { embedArray.getDouble(it).toFloat() }
+
+                // Parse labColor
+                val labArray = attr.getJSONArray("labColor")
+                val labColor = FloatArray(3) { labArray.getDouble(it).toFloat() }
+
+                // Parse seasons
+                val seasonsArray = attr.getJSONArray("seasons")
+                val seasons = List(seasonsArray.length()) { seasonsArray.getString(it) }
+
+                Garment(
+                    category = attr.getString("category"),
+                    subcategory = attr.getString("subcategory"),
+                    colorName = attr.getString("colorName"),
+                    labColor = labColor,
+                    material = attr.getString("material"),
+                    pattern = attr.getString("pattern"),
+                    fit = attr.getString("fit"),
+                    seasons = seasons,
+                    formalityScore = attr.getDouble("formalityScore").toFloat(),
+                    silhouette = attr.getString("silhouette"),
+                    brand = attr.optString("brand", "Unknown"),
+                    price = attr.optDouble("price", 0.0),
+                    imageUrl = croppedFile.absolutePath,
+                    embedding = embedding
+                )
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        } finally {
+            connection?.disconnect()
+        }
+    }
 }
 
 @Composable
@@ -357,7 +473,7 @@ fun PipelineItemRow(item: IngestionItem, onReviewClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
         ) {
-            // Mock thumbnail icon
+            // Mock thumbnail icon / actual image preview
             Box(
                 modifier = Modifier
                     .size(48.dp)
@@ -366,15 +482,25 @@ fun PipelineItemRow(item: IngestionItem, onReviewClick: () -> Unit) {
                     .border(0.5.dp, GlassBorder, RoundedCornerShape(8.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = when {
-                        item.originalImageUrl.contains("tshirt") -> Icons.Default.Checkroom
-                        item.originalImageUrl.contains("trousers") -> Icons.Default.Accessibility
-                        else -> Icons.Default.Checkroom
-                    },
-                    contentDescription = null,
-                    tint = if (item.status == IngestionStatus.READY) AccentGold else TextMuted
-                )
+                val previewPath = item.detectedGarment?.imageUrl ?: item.originalImageUrl
+                val bitmap = rememberImageBitmap(previewPath)
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = "Thumbnail Preview",
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp))
+                    )
+                } else {
+                    Icon(
+                        imageVector = when {
+                            item.originalImageUrl.contains("tshirt") -> Icons.Default.Checkroom
+                            item.originalImageUrl.contains("trousers") -> Icons.Default.Accessibility
+                            else -> Icons.Default.Checkroom
+                        },
+                        contentDescription = null,
+                        tint = if (item.status == IngestionStatus.READY) AccentGold else TextMuted
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(16.dp))
@@ -597,3 +723,148 @@ fun RetailerLinkOnramp(
         }
     }
 }
+
+// --- CROP & SEGMENTATION HELPER ---
+private fun cropAndSegmentGarmentImage(context: android.content.Context, originalPath: String): String {
+    try {
+        val file = File(originalPath)
+        if (!file.exists()) return originalPath
+
+        // Load original bitmap
+        val originalBitmap = BitmapFactory.decodeFile(originalPath) ?: return originalPath
+
+        val width = originalBitmap.width
+        val height = originalBitmap.height
+
+        // Center crop with 75% width and height
+        val cropWidth = (width * 0.75f).toInt()
+        val cropHeight = (height * 0.75f).toInt()
+        val startX = (width - cropWidth) / 2
+        val startY = (height - cropHeight) / 2
+
+        val croppedBitmap = Bitmap.createBitmap(originalBitmap, startX, startY, cropWidth, cropHeight)
+
+        // Simulating SAM2 transparent background mask (vignette cutout)
+        val maskedBitmap = Bitmap.createBitmap(cropWidth, cropHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(maskedBitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        val path = Path()
+        val rect = RectF(0f, 0f, cropWidth.toFloat(), cropHeight.toFloat())
+        // Soft rounded corners representing segmented mask boundary
+        path.addRoundRect(rect, cropWidth * 0.20f, cropHeight * 0.20f, Path.Direction.CW)
+
+        canvas.clipPath(path)
+        canvas.drawBitmap(croppedBitmap, 0f, 0f, paint)
+
+        // Save to temporary cropped file
+        val croppedFileName = "cropped_${System.currentTimeMillis()}_${(Math.random() * 1000).toInt()}.png"
+        val croppedFile = File(context.filesDir, croppedFileName)
+        FileOutputStream(croppedFile).use { out ->
+            maskedBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+        }
+
+        // Clean up
+        originalBitmap.recycle()
+        croppedBitmap.recycle()
+        maskedBitmap.recycle()
+
+        return croppedFile.absolutePath
+    } catch (e: java.lang.Exception) {
+        e.printStackTrace()
+        return originalPath
+    }
+}
+
+// --- COLOR ANALYSIS HELPERS ---
+private fun calculateAverageColor(bitmapPath: String): Int {
+    try {
+        val bitmap = BitmapFactory.decodeFile(bitmapPath) ?: return android.graphics.Color.GRAY
+        var redBucket = 0L
+        var greenBucket = 0L
+        var blueBucket = 0L
+        var pixelCount = 0L
+
+        val step = 10
+        for (y in 0 until bitmap.height step step) {
+            for (x in 0 until bitmap.width step step) {
+                val c = bitmap.getPixel(x, y)
+                val alpha = android.graphics.Color.alpha(c)
+                if (alpha > 50) {
+                    redBucket += android.graphics.Color.red(c)
+                    greenBucket += android.graphics.Color.green(c)
+                    blueBucket += android.graphics.Color.blue(c)
+                    pixelCount++
+                }
+            }
+        }
+        bitmap.recycle()
+
+        if (pixelCount == 0L) return android.graphics.Color.GRAY
+
+        val r = (redBucket / pixelCount).toInt()
+        val g = (greenBucket / pixelCount).toInt()
+        val b = (blueBucket / pixelCount).toInt()
+        return android.graphics.Color.rgb(r, g, b)
+    } catch (e: java.lang.Exception) {
+        return android.graphics.Color.GRAY
+    }
+}
+
+private fun getColorNameFromRgb(color: Int): String {
+    val r = android.graphics.Color.red(color)
+    val g = android.graphics.Color.green(color)
+    val b = android.graphics.Color.blue(color)
+
+    return when {
+        r > 220 && g > 220 && b > 220 -> "Ivory White"
+        r < 50 && g < 50 && b < 50 -> "Midnight Black"
+        r > 130 && g > 130 && b > 130 -> "Classic Gray"
+        r > 150 && g < 80 && b < 80 -> "Crimson Red"
+        r < 80 && g > 130 && b < 80 -> "Forest Green"
+        r < 80 && g < 80 && b > 150 -> "Ocean Blue"
+        r > 200 && g > 180 && b < 80 -> "Sun Yellow"
+        r > 180 && g > 110 && b < 60 -> "Terracotta Orange"
+        r > 110 && g > 80 && b < 50 -> "Chestnut Brown"
+        r > 120 && g < 60 && b > 120 -> "Royal Purple"
+        r > 90 && g > 110 && b > 90 -> "Sage Olive"
+        else -> "Desert Khaki"
+    }
+}
+
+private fun rgbToLab(rgb: Int): FloatArray {
+    val r = android.graphics.Color.red(rgb) / 255f
+    val g = android.graphics.Color.green(rgb) / 255f
+    val b = android.graphics.Color.blue(rgb) / 255f
+
+    val l = (0.2126f * r + 0.7152f * g + 0.0722f * b) * 100f
+    val a = (r - g) * 100f
+    val bb = (g - b) * 100f
+    return floatArrayOf(l, a, bb)
+}
+
+// --- METADATA EXTRACTION HEURISTICS ---
+private data class GarmentTemplate(
+    val category: String,
+    val subcategory: String,
+    val material: String,
+    val pattern: String,
+    val fit: String,
+    val silhouette: String,
+    val brand: String,
+    val price: Double,
+    val seasons: List<String>,
+    val formalityScore: Float
+)
+
+private val garmentTemplates = listOf(
+    GarmentTemplate("Top", "Oxford Shirt", "Organic Cotton", "Plain", "Regular", "Button-Down", "Ralph Lauren", 125.0, listOf("Spring", "Autumn", "Winter"), 0.6f),
+    GarmentTemplate("Top", "Silk Blouse", "Morus Silk", "Plain", "Fluid", "Draped", "Equipment", 240.0, listOf("Spring", "Summer"), 0.8f),
+    GarmentTemplate("Top", "T-Shirt", "Supima Cotton", "Plain", "Regular", "Crewneck", "A.P.C.", 45.0, listOf("Summer", "Spring"), 0.1f),
+    GarmentTemplate("Bottom", "Pleated Trousers", "Linen Wool", "Plain", "Relaxed", "Wide-Leg", "Margaret Howell", 180.0, listOf("Spring", "Summer", "Autumn"), 0.7f),
+    GarmentTemplate("Bottom", "Selvedge Jeans", "Japanese Denim", "Plain", "Straight", "Classic 5-Pocket", "OrSlow", 260.0, listOf("Autumn", "Winter", "Spring"), 0.2f),
+    GarmentTemplate("Outerwear", "Linen Blazer", "Belgian Linen", "Plain", "Tailored", "Single-breasted", "Loro Piana", 320.0, listOf("Summer", "Spring"), 0.75f),
+    GarmentTemplate("Outerwear", "Trench Coat", "Gabardine", "Plain", "Classic", "Double-breasted", "Burberry", 850.0, listOf("Spring", "Autumn"), 0.85f),
+    GarmentTemplate("Shoes", "Leather Loafers", "Calfskin Leather", "Plain", "Standard", "Penny Loafer", "G.H. Bass", 175.0, listOf("Spring", "Summer", "Autumn"), 0.7f),
+    GarmentTemplate("Shoes", "Canvas Sneakers", "Cotton Canvas", "Plain", "Standard", "Low-top", "Common Projects", 290.0, listOf("Summer", "Spring"), 0.1f)
+)

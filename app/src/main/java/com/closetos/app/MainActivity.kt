@@ -1,5 +1,6 @@
 package com.closetos.app
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
@@ -48,6 +49,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
         // Initialize local storage repository
         com.closetos.app.data.repository.ClosetRepository.init(applicationContext)
 
@@ -63,8 +65,11 @@ class MainActivity : ComponentActivity() {
                 val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
                 val scope = rememberCoroutineScope()
                 val context = LocalContext.current
+                val sharedPrefs = remember { context.getSharedPreferences("closet_os_prefs", Context.MODE_PRIVATE) }
 
-                var hasCompletedOnboarding by remember { mutableStateOf(false) }
+                var hasCompletedOnboarding by remember {
+                    mutableStateOf(sharedPrefs.getBoolean("has_completed_onboarding", false))
+                }
                 var activeRoute by remember { mutableStateOf(Screen.Ootd.route) }
 
                 // Outer Modal navigation drawer serving as the Developer Overrides Jump Drawer
@@ -123,6 +128,7 @@ class MainActivity : ComponentActivity() {
                                             .clip(RoundedCornerShape(8.dp))
                                             .clickable {
                                                 hasCompletedOnboarding = true
+                                                sharedPrefs.edit().putBoolean("has_completed_onboarding", true).apply()
                                                 activeRoute = item.route
                                                 scope.launch {
                                                     drawerState.close()
@@ -159,6 +165,7 @@ class MainActivity : ComponentActivity() {
                                 Button(
                                     onClick = {
                                         hasCompletedOnboarding = !hasCompletedOnboarding
+                                        sharedPrefs.edit().putBoolean("has_completed_onboarding", hasCompletedOnboarding).apply()
                                         val status = if (hasCompletedOnboarding) "Bypassed Onboarding" else "Onboarding Quiz Required"
                                         Toast.makeText(context, status, Toast.LENGTH_SHORT).show()
                                         scope.launch { drawerState.close() }
@@ -249,6 +256,7 @@ class MainActivity : ComponentActivity() {
                             if (!hasCompletedOnboarding) {
                                 OnboardingScreen(onOnboardingComplete = {
                                     hasCompletedOnboarding = true
+                                    sharedPrefs.edit().putBoolean("has_completed_onboarding", true).apply()
                                 })
                             } else {
                                 NavHost(

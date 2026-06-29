@@ -90,7 +90,13 @@ data class IngestionItem(
 )
 
 enum class IngestionStatus {
-    PRE_FLIGHT, DETECTION, SEGMENTATION, TAGGING, EMBEDDING, READY
+    PRE_FLIGHT,
+    GROUNDING_DINO,
+    SAM2,
+    CROP_GARMENT,
+    FASHION_CLIP,
+    FLORENCE_2,
+    READY
 }
 
 data class TripPlan(

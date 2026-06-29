@@ -38,7 +38,6 @@ object ClosetRepository {
         val context = appContext ?: return
         val file = File(context.filesDir, "closet_os_data.json")
         if (!file.exists()) {
-            seedInitialCloset()
             saveData()
             return
         }
@@ -52,6 +51,8 @@ object ClosetRepository {
             val garmentsList = mutableListOf<Garment>()
             for (i in 0 until garmentsArray.length()) {
                 val gObj = garmentsArray.getJSONObject(i)
+                val id = gObj.getString("id")
+                if (id.startsWith("g_")) continue
                 val labJson = gObj.getJSONArray("labColor")
                 val labColor = FloatArray(3) { labJson.getDouble(it).toFloat() }
                 
@@ -139,9 +140,11 @@ object ClosetRepository {
                 val plansList = mutableListOf<TripPlan>()
                 for (i in 0 until tripPlansArray.length()) {
                     val pObj = tripPlansArray.getJSONObject(i)
+                    val id = pObj.getString("id")
+                    if (id.startsWith("trip_")) continue
                     plansList.add(
                         TripPlan(
-                            id = pObj.getString("id"),
+                            id = id,
                             destination = pObj.getString("destination"),
                             startDate = pObj.getLong("startDate"),
                             endDate = pObj.getLong("endDate"),
@@ -155,7 +158,7 @@ object ClosetRepository {
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            seedInitialCloset()
+            saveData()
         }
     }
 
@@ -684,7 +687,7 @@ object ClosetRepository {
     }
 
     // HELPER: SEED SAMPLES
-    private fun seedInitialCloset() {
+    fun seedInitialCloset() {
         val sampleGarments = listOf(
             Garment(
                 id = "g_shirt_oxford_blue",

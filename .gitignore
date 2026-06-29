@@ -39,3 +39,14 @@ Thumbs.db
 
 # Google Services Configuration
 google-services.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+.ipynb_checkpoints/
+

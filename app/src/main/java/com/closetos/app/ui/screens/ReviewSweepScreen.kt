@@ -2,6 +2,7 @@ package com.closetos.app.ui.screens
 
 import android.widget.Toast
 import androidx.compose.animation.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -138,15 +139,24 @@ fun ReviewSweepScreen(onBack: () -> Unit) {
                         .padding(4.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = when (item.detectedGarment?.category) {
-                            "Top" -> Icons.Default.Checkroom
-                            "Bottom" -> Icons.Default.Accessibility
-                            else -> Icons.Default.Checkroom
-                        },
-                        contentDescription = null,
-                        tint = if (isActive) AccentGold else TextMuted
-                    )
+                    val bitmap = item.detectedGarment?.imageUrl?.let { com.closetos.app.ui.components.rememberImageBitmap(it) }
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp))
+                        )
+                    } else {
+                        Icon(
+                            imageVector = when (item.detectedGarment?.category) {
+                                "Top" -> Icons.Default.Checkroom
+                                "Bottom" -> Icons.Default.Accessibility
+                                else -> Icons.Default.Checkroom
+                            },
+                            contentDescription = null,
+                            tint = if (isActive) AccentGold else TextMuted
+                        )
+                    }
                 }
             }
         }
@@ -173,39 +183,51 @@ fun ReviewSweepScreen(onBack: () -> Unit) {
                         .border(0.5.dp, GlassBorder, RoundedCornerShape(16.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Simulating a parsed product silhouette outline
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Box(
+                    val bitmap = item.detectedGarment?.imageUrl?.let { com.closetos.app.ui.components.rememberImageBitmap(it) }
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap,
+                            contentDescription = "Segmented Garment Cutout",
                             modifier = Modifier
-                                .size(90.dp)
-                                .clip(RoundedCornerShape(45.dp))
-                                .background(Color(0x33E5C185))
-                                .border(0.5.dp, AccentGold, RoundedCornerShape(45.dp)),
-                            contentAlignment = Alignment.Center
+                                .fillMaxHeight(0.9f)
+                                .aspectRatio(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                        )
+                    } else {
+                        // Simulating a parsed product silhouette outline
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(16.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.AutoAwesome,
-                                contentDescription = null,
-                                tint = AccentGold,
-                                modifier = Modifier.size(40.dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(90.dp)
+                                    .clip(RoundedCornerShape(45.dp))
+                                    .background(Color(0x33E5C185))
+                                    .border(0.5.dp, AccentGold, RoundedCornerShape(45.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = AccentGold,
+                                    modifier = Modifier.size(40.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Clean alpha-matte segmented cutout [RGBA PNG]",
+                                fontFamily = OutfitFont,
+                                fontSize = 12.sp,
+                                color = TextMuted
+                            )
+                            Text(
+                                text = "Matte: BiRefNet • Background removed",
+                                fontFamily = OutfitFont,
+                                fontSize = 10.sp,
+                                color = AccentGold
                             )
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "Clean alpha-matte segmented cutout [RGBA PNG]",
-                            fontFamily = OutfitFont,
-                            fontSize = 12.sp,
-                            color = TextMuted
-                        )
-                        Text(
-                            text = "Matte: BiRefNet • Background removed",
-                            fontFamily = OutfitFont,
-                            fontSize = 10.sp,
-                            color = AccentGold
-                        )
                     }
                 }
 

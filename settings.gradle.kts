@@ -14,4 +14,5 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "ClosetOS"
-include(":app")
+include(":composeApp")
+
