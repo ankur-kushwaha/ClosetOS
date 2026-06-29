@@ -26,6 +26,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import android.Manifest
+import android.graphics.Bitmap
+import java.io.File
+import java.io.FileOutputStream
+import androidx.compose.ui.graphics.asImageBitmap
 import com.closetos.app.data.model.UserTaste
 import com.closetos.app.data.repository.ClosetRepository
 import com.closetos.app.ui.components.ElegantButton
@@ -58,6 +69,36 @@ fun OnboardingScreen(onOnboardingComplete: () -> Unit) {
     var selfieAttached by remember { mutableStateOf(false) }
     var processingLog by remember { mutableStateOf("Ready to capture.") }
     var progressVal by remember { mutableStateOf(0.0f) }
+
+    val context = LocalContext.current
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasCameraPermission = isGranted
+        if (!isGranted) {
+            Toast.makeText(context, "Camera permission is required to capture selfie.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap: Bitmap? ->
+        if (bitmap != null) {
+            scope.launch {
+                val file = File(context.filesDir, "digital_twin_selfie.jpg")
+                FileOutputStream(file).use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                }
+                selfieAttached = true
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -167,7 +208,13 @@ fun OnboardingScreen(onOnboardingComplete: () -> Unit) {
                             ageGate = ageGateChecked,
                             onConsentChange = { consentLiveness = it },
                             onAgeChange = { ageGateChecked = it },
-                            onAttachSelfie = { selfieAttached = true }
+                            onAttachSelfie = {
+                                if (hasCameraPermission) {
+                                    cameraLauncher.launch(null)
+                                } else {
+                                    permissionLauncher.launch(Manifest.permission.CAMERA)
+                                }
+                            }
                         )
                         8 -> DigitalTwinProcessing(
                             log = processingLog,
@@ -401,27 +448,39 @@ fun DigitalTwinCaptureFlow(
                     )
                 }
             } else {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.Face,
-                        contentDescription = null,
-                        tint = AccentGold,
-                        modifier = Modifier.size(56.dp)
+                val imagePath = File(LocalContext.current.filesDir, "digital_twin_selfie.jpg").absolutePath
+                val bitmap = com.closetos.app.ui.components.rememberImageBitmap(imagePath)
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = "Digital Twin Selfie",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(16.dp))
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Selfie uploaded successfully",
-                        fontFamily = OutfitFont,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = AccentGold
-                    )
-                    Text(
-                        text = "Face matches bounds. Liveness verified.",
-                        fontFamily = OutfitFont,
-                        fontSize = 12.sp,
-                        color = TextMuted
-                    )
+                } else {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.Face,
+                            contentDescription = null,
+                            tint = AccentGold,
+                            modifier = Modifier.size(56.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Selfie uploaded successfully",
+                            fontFamily = OutfitFont,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = AccentGold
+                        )
+                        Text(
+                            text = "Face matches bounds. Liveness verified.",
+                            fontFamily = OutfitFont,
+                            fontSize = 12.sp,
+                            color = TextMuted
+                        )
+                    }
                 }
             }
         }

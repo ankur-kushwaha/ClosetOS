@@ -48,7 +48,8 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState);
+        // Initialize local storage repository
+        com.closetos.app.data.repository.ClosetRepository.init(applicationContext)
 
         // Check if launched via Android Send Share intent
         var sharedUrl: String? = null

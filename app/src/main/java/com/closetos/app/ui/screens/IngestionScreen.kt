@@ -1,6 +1,11 @@
 package com.closetos.app.ui.screens
 
 import androidx.compose.animation.*
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
+import java.io.File
+import java.io.FileOutputStream
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -93,24 +99,42 @@ fun IngestionScreen(
             )
         }
 
+        val context = LocalContext.current
+        val galleryLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.GetMultipleContents()
+        ) { uris: List<Uri> ->
+            if (uris.isNotEmpty()) {
+                scope.launch {
+                    val localPaths = uris.mapIndexed { idx, uri ->
+                        val fileName = "gallery_crop_${System.currentTimeMillis()}_$idx.jpg"
+                        val file = File(context.filesDir, fileName)
+                        context.contentResolver.openInputStream(uri)?.use { inputStream: java.io.InputStream ->
+                            FileOutputStream(file).use { outputStream: FileOutputStream ->
+                                inputStream.copyTo(outputStream)
+                            }
+                        }
+                        file.absolutePath
+                    }
+                    ClosetRepository.queueIngestionItems(localPaths)
+                    // Trigger background pipelines
+                    localPaths.forEach { path: String ->
+                        // Retrieve the queued item dynamically
+                        val item = ClosetRepository.ingestionQueue.value.find { it.originalImageUrl == path }
+                        if (item != null) {
+                            launch { simulateGarmentPipeline(item, context) }
+                        }
+                    }
+                }
+            }
+        }
+
         // Tab Content Panel
         Box(modifier = Modifier.weight(1f)) {
             when (activeTab) {
                 0 -> BulkCameraOnramp(
                     queue = queue,
                     onSelectPhotos = {
-                        val photoUrls = listOf(
-                            "gallery_image_cotton_tshirt.jpg",
-                            "gallery_image_pleated_trousers.jpg",
-                            "gallery_image_linen_blazer.jpg"
-                        )
-                        ClosetRepository.queueIngestionItems(photoUrls)
-                        // Trigger background processor simulators
-                        scope.launch {
-                            ClosetRepository.ingestionQueue.value.takeLast(3).forEach { item ->
-                                launch { simulateGarmentPipeline(item) }
-                            }
-                        }
+                        galleryLauncher.launch("image/*")
                     },
                     onNavigateToReview = onNavigateToReview
                 )
@@ -128,11 +152,10 @@ fun IngestionScreen(
                             delay(1500)
                             isFetchingLink = false
                             retailerUrl = ""
-                            // Put single parsed item in the queue
                             ClosetRepository.queueIngestionItems(listOf("retailer_fetched_silk_dress.jpg"))
                             val parsedItem = ClosetRepository.ingestionQueue.value.last()
-                            launch { simulateGarmentPipeline(parsedItem) }
-                            activeTab = 0 // jump back to monitor queue
+                            launch { simulateGarmentPipeline(parsedItem, context) }
+                            activeTab = 0
                         }
                     }
                 )
@@ -142,7 +165,7 @@ fun IngestionScreen(
 }
 
 // PIPELINE BACKGROUND TASK SIMULATOR
-private suspend fun simulateGarmentPipeline(item: IngestionItem) {
+private suspend fun simulateGarmentPipeline(item: IngestionItem, context: android.content.Context) {
     val id = item.id
     val filename = item.originalImageUrl
     
@@ -229,7 +252,13 @@ private suspend fun simulateGarmentPipeline(item: IngestionItem) {
     ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.EMBEDDING, 0.95f, "FashionCLIP: Generating 512-dimension vector key...")
     delay(900)
 
-    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.READY, 1.0f, "Ingestion Pipeline Completed!", mockGarment)
+    val adjustedGarment = if (filename.contains("/") || filename.contains(".")) {
+        mockGarment.copy(imageUrl = filename)
+    } else {
+        mockGarment
+    }
+
+    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.READY, 1.0f, "Ingestion Pipeline Completed!", adjustedGarment)
 }
 
 @Composable

@@ -1,5 +1,6 @@
 package com.closetos.app.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -164,17 +165,28 @@ fun GarmentCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = when(garment.category) {
-                        "Top" -> Icons.Default.Checkroom
-                        "Bottom" -> Icons.Default.Accessibility
-                        "Outerwear" -> Icons.Default.Layers
-                        else -> Icons.Default.Hiking
-                    },
-                    contentDescription = null,
-                    tint = TextMuted,
-                    modifier = Modifier.size(20.dp)
-                )
+                val bitmap = com.closetos.app.ui.components.rememberImageBitmap(garment.imageUrl)
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                    )
+                } else {
+                    Icon(
+                        imageVector = when(garment.category) {
+                            "Top" -> Icons.Default.Checkroom
+                            "Bottom" -> Icons.Default.Accessibility
+                            "Outerwear" -> Icons.Default.Layers
+                            else -> Icons.Default.Checkroom
+                        },
+                        contentDescription = null,
+                        tint = TextMuted,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
 
                 if (similarityScore != null) {
                     Text(

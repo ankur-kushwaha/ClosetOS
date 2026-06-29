@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -206,5 +208,21 @@ fun SectionHeader(
             thickness = 0.5.dp,
             modifier = Modifier.fillMaxWidth(0.2f)
         )
+    }
+}
+
+@Composable
+fun rememberImageBitmap(path: String): androidx.compose.ui.graphics.ImageBitmap? {
+    return remember(path) {
+        try {
+            val file = java.io.File(path)
+            if (file.exists()) {
+                android.graphics.BitmapFactory.decodeFile(path)?.asImageBitmap()
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 }

@@ -2,6 +2,7 @@ package com.closetos.app.ui.screens
 
 import android.widget.Toast
 import androidx.compose.animation.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,6 +33,8 @@ import com.closetos.app.ui.components.TagChip
 import com.closetos.app.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun OotdScreen() {
@@ -39,14 +42,53 @@ fun OotdScreen() {
     val scope = rememberCoroutineScope()
 
     // Context context variables
-    val currentTemp = 74f
+    var currentTemp by remember { mutableStateOf(74f) }
+    var weatherDesc by remember { mutableStateOf("Clear & Sunny") }
     val occasionContext = "Work Presentation & Socials"
+
+    LaunchedEffect(Unit) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                // Request current weather for London context from open-meteo (public, no key required)
+                val url = java.net.URL("https://api.open-meteo.com/v1/forecast?latitude=51.5074&longitude=-0.1278&current_weather=true")
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "GET"
+                connection.connectTimeout = 5000
+                connection.readTimeout = 5000
+                
+                val response = connection.inputStream.bufferedReader().use { it.readText() }
+                val jsonObj = org.json.JSONObject(response)
+                val currentWeather = jsonObj.getJSONObject("current_weather")
+                val tempC = currentWeather.getDouble("temperature").toFloat()
+                val tempF = (tempC * 9f / 5f) + 32f
+                val code = currentWeather.getInt("weathercode")
+                val desc = when (code) {
+                    0 -> "Clear & Sunny"
+                    1, 2, 3 -> "Partly Cloudy"
+                    45, 48 -> "Foggy Weather"
+                    51, 53, 55 -> "Light Drizzle"
+                    61, 63, 65 -> "Rainy Day"
+                    71, 73, 75 -> "Snowy Day"
+                    80, 81, 82 -> "Showers"
+                    95, 96, 99 -> "Thunderstorms"
+                    else -> "Muted Day"
+                }
+
+                withContext(Dispatchers.Main) {
+                    currentTemp = tempF
+                    weatherDesc = desc
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
     // Recommendations list from Repository
     val garmentsList by ClosetRepository.garments.collectAsState()
     
     // Generate cached recommendations overnight
-    val cachedOutfits = remember(garmentsList) {
+    val cachedOutfits = remember(garmentsList, currentTemp) {
         ClosetRepository.generateRecommendations(currentTemp, occasionContext)
     }
 
@@ -117,7 +159,7 @@ fun OotdScreen() {
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "74°F • Sunny",
+                        text = "${currentTemp.toInt()}°F • $weatherDesc",
                         fontFamily = OutfitFont,
                         fontSize = 12.sp,
                         color = TextLight
@@ -243,17 +285,26 @@ fun OotdScreen() {
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Icon(
-                                                imageVector = when(garment.category) {
-                                                    "Top" -> Icons.Default.Checkroom
-                                                    "Bottom" -> Icons.Default.Accessibility
-                                                    "Outerwear" -> Icons.Default.Layers
-                                                    else -> Icons.Default.Hiking
-                                                },
-                                                contentDescription = null,
-                                                tint = AccentGold,
-                                                modifier = Modifier.size(18.dp)
-                                            )
+                                            val bitmap = com.closetos.app.ui.components.rememberImageBitmap(garment.imageUrl)
+                                            if (bitmap != null) {
+                                                Image(
+                                                    bitmap = bitmap,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp))
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = when(garment.category) {
+                                                        "Top" -> Icons.Default.Checkroom
+                                                        "Bottom" -> Icons.Default.Accessibility
+                                                        "Outerwear" -> Icons.Default.Layers
+                                                        else -> Icons.Default.Checkroom
+                                                    },
+                                                    contentDescription = null,
+                                                    tint = AccentGold,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
                                             Text(
                                                 text = garment.subcategory.take(8),
                                                 fontFamily = OutfitFont,

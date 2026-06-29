@@ -1,9 +1,13 @@
 package com.closetos.app.data.repository
 
+import android.content.Context
 import com.closetos.app.data.model.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 import kotlin.math.sqrt
 
 object ClosetRepository {
@@ -23,12 +27,239 @@ object ClosetRepository {
     private val _tripPlans = MutableStateFlow<List<TripPlan>>(emptyList())
     val tripPlans: StateFlow<List<TripPlan>> = _tripPlans.asStateFlow()
 
-    init {
-        seedInitialCloset()
+    private var appContext: Context? = null
+
+    fun init(context: Context) {
+        appContext = context.applicationContext
+        loadData()
+    }
+
+    private fun loadData() {
+        val context = appContext ?: return
+        val file = File(context.filesDir, "closet_os_data.json")
+        if (!file.exists()) {
+            seedInitialCloset()
+            saveData()
+            return
+        }
+
+        try {
+            val jsonString = file.readText()
+            val root = JSONObject(jsonString)
+
+            // Load Garments
+            val garmentsArray = root.getJSONArray("garments")
+            val garmentsList = mutableListOf<Garment>()
+            for (i in 0 until garmentsArray.length()) {
+                val gObj = garmentsArray.getJSONObject(i)
+                val labJson = gObj.getJSONArray("labColor")
+                val labColor = FloatArray(3) { labJson.getDouble(it).toFloat() }
+                
+                val embedJson = gObj.getJSONArray("embedding")
+                val embedding = FloatArray(512) { embedJson.optDouble(it, 0.0).toFloat() }
+                
+                val seasonsJson = gObj.getJSONArray("seasons")
+                val seasons = List(seasonsJson.length()) { seasonsJson.getString(it) }
+
+                garmentsList.add(
+                    Garment(
+                        id = gObj.getString("id"),
+                        category = gObj.getString("category"),
+                        subcategory = gObj.getString("subcategory"),
+                        colorName = gObj.getString("colorName"),
+                        labColor = labColor,
+                        material = gObj.getString("material"),
+                        pattern = gObj.getString("pattern"),
+                        fit = gObj.getString("fit"),
+                        seasons = seasons,
+                        formalityScore = gObj.getDouble("formalityScore").toFloat(),
+                        silhouette = gObj.getString("silhouette"),
+                        price = gObj.optDouble("price", 0.0),
+                        brand = gObj.optString("brand", "Unknown"),
+                        imageUrl = gObj.optString("imageUrl", ""),
+                        embedding = embedding,
+                        costPerWear = gObj.optDouble("costPerWear", 0.0),
+                        wearCount = gObj.optInt("wearCount", 0),
+                        laundryStatus = LaundryStatus.valueOf(gObj.optString("laundryStatus", "CLEAN")),
+                        dateAdded = gObj.optLong("dateAdded", System.currentTimeMillis())
+                    )
+                )
+            }
+            _garments.value = garmentsList
+
+            // Load Taste
+            val tasteObj = root.optJSONObject("userTaste")
+            if (tasteObj != null) {
+                val prefStylesJson = tasteObj.getJSONArray("preferredStyles")
+                val prefStyles = List(prefStylesJson.length()) { prefStylesJson.getString(it) }
+                val colorsAvoidedJson = tasteObj.getJSONArray("colorsAvoided")
+                val colorsAvoided = List(colorsAvoidedJson.length()) { colorsAvoidedJson.getString(it) }
+                val prefFits = tasteObj.optJSONArray("preferredFits")?.let { arr -> List(arr.length()) { arr.getString(it) } } ?: emptyList()
+                val occasionsJson = tasteObj.getJSONArray("occasions")
+                val occasions = List(occasionsJson.length()) { occasionsJson.getString(it) }
+                val tVecJson = tasteObj.getJSONArray("tasteVector")
+                val tasteVector = FloatArray(512) { tVecJson.optDouble(it, 0.0).toFloat() }
+
+                _userTaste.value = UserTaste(
+                    preferredStyles = prefStyles,
+                    colorsAvoided = colorsAvoided,
+                    preferredFits = prefFits,
+                    occasions = occasions,
+                    tasteVector = tasteVector
+                )
+            }
+
+            // Load Wear History
+            val wearHistoryArray = root.optJSONArray("wearHistory")
+            if (wearHistoryArray != null) {
+                val wearList = mutableListOf<WearEvent>()
+                for (i in 0 until wearHistoryArray.length()) {
+                    val wObj = wearHistoryArray.getJSONObject(i)
+                    val gWornJson = wObj.getJSONArray("garmentsWornIds")
+                    val gWorn = List(gWornJson.length()) { gWornJson.getString(it) }
+
+                    wearList.add(
+                        WearEvent(
+                            id = wObj.getString("id"),
+                            date = wObj.getLong("date"),
+                            outfitId = wObj.getString("outfitId"),
+                            garmentsWornIds = gWorn,
+                            loved = wObj.optBoolean("loved", false),
+                            skipped = wObj.optBoolean("skipped", false),
+                            selfieUrl = if (wObj.isNull("selfieUrl")) null else wObj.optString("selfieUrl")
+                        )
+                    )
+                }
+                _wearHistory.value = wearList
+            }
+
+            // Load Trip Plans
+            val tripPlansArray = root.optJSONArray("tripPlans")
+            if (tripPlansArray != null) {
+                val plansList = mutableListOf<TripPlan>()
+                for (i in 0 until tripPlansArray.length()) {
+                    val pObj = tripPlansArray.getJSONObject(i)
+                    plansList.add(
+                        TripPlan(
+                            id = pObj.getString("id"),
+                            destination = pObj.getString("destination"),
+                            startDate = pObj.getLong("startDate"),
+                            endDate = pObj.getLong("endDate"),
+                            tempLow = pObj.getDouble("tempLow").toFloat(),
+                            tempHigh = pObj.getDouble("tempHigh").toFloat(),
+                            weatherCondition = pObj.getString("weatherCondition")
+                        )
+                    )
+                }
+                _tripPlans.value = plansList
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            seedInitialCloset()
+        }
+    }
+
+    fun saveData() {
+        val context = appContext ?: return
+        val file = File(context.filesDir, "closet_os_data.json")
+        try {
+            val root = JSONObject()
+
+            // Save Garments
+            val garmentsArray = JSONArray()
+            for (g in _garments.value) {
+                val gObj = JSONObject().apply {
+                    put("id", g.id)
+                    put("category", g.category)
+                    put("subcategory", g.subcategory)
+                    put("colorName", g.colorName)
+                    
+                    val labJson = JSONArray().apply { g.labColor.forEach { put(it.toDouble()) } }
+                    put("labColor", labJson)
+                    
+                    put("material", g.material)
+                    put("pattern", g.pattern)
+                    put("fit", g.fit)
+                    
+                    val seasonsJson = JSONArray().apply { g.seasons.forEach { put(it) } }
+                    put("seasons", seasonsJson)
+                    
+                    put("formalityScore", g.formalityScore.toDouble())
+                    put("silhouette", g.silhouette)
+                    put("price", g.price)
+                    put("brand", g.brand)
+                    put("imageUrl", g.imageUrl)
+                    
+                    val embedJson = JSONArray().apply { g.embedding.forEach { put(it.toDouble()) } }
+                    put("embedding", embedJson)
+                    
+                    put("costPerWear", g.costPerWear)
+                    put("wearCount", g.wearCount)
+                    put("laundryStatus", g.laundryStatus.name)
+                    put("dateAdded", g.dateAdded)
+                }
+                garmentsArray.put(gObj)
+            }
+            root.put("garments", garmentsArray)
+
+            // Save Taste
+            val taste = _userTaste.value
+            val tasteObj = JSONObject().apply {
+                val prefStylesJson = JSONArray().apply { taste.preferredStyles.forEach { put(it) } }
+                put("preferredStyles", prefStylesJson)
+                val colorsAvoidedJson = JSONArray().apply { taste.colorsAvoided.forEach { put(it) } }
+                put("colorsAvoided", colorsAvoidedJson)
+                val prefFitsJson = JSONArray().apply { taste.preferredFits.forEach { put(it) } }
+                put("preferredFits", prefFitsJson)
+                val occasionsJson = JSONArray().apply { taste.occasions.forEach { put(it) } }
+                put("occasions", occasionsJson)
+                val tVecJson = JSONArray().apply { taste.tasteVector.forEach { put(it.toDouble()) } }
+                put("tasteVector", tVecJson)
+            }
+            root.put("userTaste", tasteObj)
+
+            // Save Wear History
+            val wearHistoryArray = JSONArray()
+            for (w in _wearHistory.value) {
+                val wObj = JSONObject().apply {
+                    put("id", w.id)
+                    put("date", w.date)
+                    put("outfitId", w.outfitId)
+                    val gWornJson = JSONArray().apply { w.garmentsWornIds.forEach { put(it) } }
+                    put("garmentsWornIds", gWornJson)
+                    put("loved", w.loved)
+                    put("skipped", w.skipped)
+                    put("selfieUrl", w.selfieUrl ?: JSONObject.NULL)
+                }
+                wearHistoryArray.put(wObj)
+            }
+            root.put("wearHistory", wearHistoryArray)
+
+            // Save Trip Plans
+            val tripPlansArray = JSONArray()
+            for (p in _tripPlans.value) {
+                val pObj = JSONObject().apply {
+                    put("id", p.id)
+                    put("destination", p.destination)
+                    put("startDate", p.startDate)
+                    put("endDate", p.endDate)
+                    put("tempLow", p.tempLow.toDouble())
+                    put("tempHigh", p.tempHigh.toDouble())
+                    put("weatherCondition", p.weatherCondition)
+                }
+                tripPlansArray.put(pObj)
+            }
+            root.put("tripPlans", tripPlansArray)
+
+            file.writeText(root.toString())
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     fun updateTaste(taste: UserTaste) {
         _userTaste.value = taste
+        saveData()
     }
 
     // SIMULATED INGESTION
@@ -60,6 +291,7 @@ object ClosetRepository {
             _garments.value = _garments.value + garment
         }
         _ingestionQueue.value = _ingestionQueue.value.filter { it.id != itemId }
+        saveData()
     }
 
     fun rejectIngestionItem(itemId: String) {
@@ -89,6 +321,7 @@ object ClosetRepository {
                 g
             }
         }
+        saveData()
     }
 
     // WEAR LOGGING & flywheel updates
@@ -137,6 +370,7 @@ object ClosetRepository {
             
             _userTaste.value = currentTaste.copy(tasteVector = blendedVector)
         }
+        saveData()
     }
 
     // SIMULATED FASHIONCLIP EMBEDDING SEARCH
@@ -446,6 +680,7 @@ object ClosetRepository {
             dailyOutfits = dayOutfits
         )
         _tripPlans.value = _tripPlans.value + plan
+        saveData()
     }
 
     // HELPER: SEED SAMPLES
