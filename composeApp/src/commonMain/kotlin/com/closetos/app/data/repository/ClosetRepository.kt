@@ -76,7 +76,7 @@ object ClosetRepository {
             val labStr = g.labColor.joinToString(",")
             val seasonsStr = g.seasons.joinToString(",")
             val embedStr = g.embedding.joinToString(",")
-            sb.append("${g.id}|${g.category}|${g.subcategory}|${g.colorName}|$labStr|${g.material}|${g.pattern}|${g.fit}|$seasonsStr|${g.formalityScore}|${g.silhouette}|${g.price}|${g.brand}|${g.imageUrl}|$embedStr|${g.costPerWear}|${g.wearCount}|${g.laundryStatus.name}|${g.dateAdded}\n")
+            sb.append("${g.id}|${g.category}|${g.subcategory}|${g.colorName}|$labStr|${g.material}|${g.pattern}|${g.fit}|$seasonsStr|${g.formalityScore}|${g.silhouette}|${g.price}|${g.brand}|${g.imageUrl}|$embedStr|${g.costPerWear}|${g.wearCount}|${g.laundryStatus.name}|${g.dateAdded}|${g.straightenedImageUrl}\n")
         }
         
         sb.append("[TASTE]\n")
@@ -141,6 +141,7 @@ object ClosetRepository {
                             val wearCount = parts[16].toInt()
                             val laundryStatus = LaundryStatus.valueOf(parts[17])
                             val dateAdded = parts[18].toLong()
+                            val straightenedImageUrl = if (parts.size >= 20) parts[19] else ""
                             
                             garmentsList.add(Garment(
                                 id = id, category = category, subcategory = subcategory, colorName = colorName,
@@ -148,7 +149,7 @@ object ClosetRepository {
                                 seasons = seasons, formalityScore = formalityScore, silhouette = silhouette,
                                 price = price, brand = brand, imageUrl = imageUrl, embedding = embedding,
                                 costPerWear = costPerWear, wearCount = wearCount, laundryStatus = laundryStatus,
-                                dateAdded = dateAdded
+                                dateAdded = dateAdded, straightenedImageUrl = straightenedImageUrl
                             ))
                         }
                     }

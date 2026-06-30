@@ -275,6 +275,7 @@ private suspend fun simulateGarmentPipeline(item: IngestionItem, context: androi
             price = template.price,
             brand = template.brand + " (Local Fallback)",
             imageUrl = croppedPath,
+            straightenedImageUrl = croppedPath,
             embedding = embedding
         )
     }
@@ -328,6 +329,7 @@ private suspend fun uploadImageToBackend(context: android.content.Context, image
                 val jsonResponse = connection.inputStream.bufferedReader().use { it.readText() }
                 val root = JSONObject(jsonResponse)
                 val base64Img = root.getString("image_base64")
+                val straightenedBase64Img = root.optString("straightened_image_base64", base64Img)
                 val attr = root.getJSONObject("attributes")
 
                 // Decode base64 PNG and write to file
@@ -335,6 +337,13 @@ private suspend fun uploadImageToBackend(context: android.content.Context, image
                 val croppedFile = File(context.filesDir, "cropped_server_${System.currentTimeMillis()}.png")
                 FileOutputStream(croppedFile).use { fos ->
                     fos.write(pngBytes)
+                }
+
+                // Decode straightened base64 PNG and write to file
+                val straightenedPngBytes = Base64.decode(straightenedBase64Img, Base64.DEFAULT)
+                val straightenedFile = File(context.filesDir, "straightened_server_${System.currentTimeMillis()}.png")
+                FileOutputStream(straightenedFile).use { fos ->
+                    fos.write(straightenedPngBytes)
                 }
 
                 // Parse embedding
@@ -363,6 +372,7 @@ private suspend fun uploadImageToBackend(context: android.content.Context, image
                     brand = attr.optString("brand", "Unknown"),
                     price = attr.optDouble("price", 0.0),
                     imageUrl = croppedFile.absolutePath,
+                    straightenedImageUrl = straightenedFile.absolutePath,
                     embedding = embedding
                 )
             } else {

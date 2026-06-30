@@ -78,6 +78,7 @@ object ClosetRepository {
                         price = gObj.optDouble("price", 0.0),
                         brand = gObj.optString("brand", "Unknown"),
                         imageUrl = gObj.optString("imageUrl", ""),
+                        straightenedImageUrl = gObj.optString("straightenedImageUrl", ""),
                         embedding = embedding,
                         costPerWear = gObj.optDouble("costPerWear", 0.0),
                         wearCount = gObj.optInt("wearCount", 0),
@@ -192,6 +193,7 @@ object ClosetRepository {
                     put("price", g.price)
                     put("brand", g.brand)
                     put("imageUrl", g.imageUrl)
+                    put("straightenedImageUrl", g.straightenedImageUrl)
                     
                     val embedJson = JSONArray().apply { g.embedding.forEach { put(it.toDouble()) } }
                     put("embedding", embedJson)

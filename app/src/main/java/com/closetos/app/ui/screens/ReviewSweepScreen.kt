@@ -55,9 +55,11 @@ fun ReviewSweepScreen(onBack: () -> Unit) {
     var editMaterial by remember { mutableStateOf("") }
     var editFit by remember { mutableStateOf("") }
     var editFormality by remember { mutableStateOf(0.5f) }
+    var showStraightened by remember { mutableStateOf(true) }
 
     // Sync editing state when active item changes
     LaunchedEffect(activeItem) {
+        showStraightened = true // Reset toggle on new item
         activeItem?.detectedGarment?.let { garment ->
             editCategory = garment.category
             editSubcategory = garment.subcategory
@@ -183,7 +185,12 @@ fun ReviewSweepScreen(onBack: () -> Unit) {
                         .border(0.5.dp, GlassBorder, RoundedCornerShape(16.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    val bitmap = item.detectedGarment?.imageUrl?.let { com.closetos.app.ui.components.rememberImageBitmap(it) }
+                    val displayUrl = if (showStraightened && !item.detectedGarment?.straightenedImageUrl.isNullOrEmpty()) {
+                        item.detectedGarment?.straightenedImageUrl ?: ""
+                    } else {
+                        item.detectedGarment?.imageUrl ?: ""
+                    }
+                    val bitmap = if (displayUrl.isNotEmpty()) com.closetos.app.ui.components.rememberImageBitmap(displayUrl) else null
                     if (bitmap != null) {
                         Image(
                             bitmap = bitmap,
@@ -227,6 +234,49 @@ fun ReviewSweepScreen(onBack: () -> Unit) {
                                 fontSize = 10.sp,
                                 color = AccentGold
                             )
+                        }
+                    }
+
+                    // Raw vs Straightened Toggle Pill inside the image container
+                    if (item.detectedGarment != null && !item.detectedGarment.straightenedImageUrl.isNullOrEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(8.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(CharcoalSurface.copy(alpha = 0.8f))
+                                .border(0.5.dp, GlassBorder, RoundedCornerShape(20.dp))
+                                .padding(horizontal = 4.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (!showStraightened) AccentGold else Color.Transparent)
+                                    .clickable { showStraightened = false }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "Raw",
+                                    color = if (!showStraightened) ObsidianBg else TextMuted,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (showStraightened) AccentGold else Color.Transparent)
+                                    .clickable { showStraightened = true }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "Straightened",
+                                    color = if (showStraightened) ObsidianBg else TextMuted,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }
@@ -441,6 +491,16 @@ fun ReviewSweepScreen(onBack: () -> Unit) {
                         onClick = {
                             Toast.makeText(context, "Confirmed! Garment parsed & pushed live to Wardrobe Graph.", Toast.LENGTH_SHORT).show()
                             val originalGarment = item.detectedGarment!!
+                            val finalImageUrl = if (showStraightened && !originalGarment.straightenedImageUrl.isNullOrEmpty()) {
+                                originalGarment.straightenedImageUrl
+                            } else {
+                                originalGarment.imageUrl
+                            }
+                            val finalStraightenedImageUrl = if (showStraightened && !originalGarment.straightenedImageUrl.isNullOrEmpty()) {
+                                originalGarment.imageUrl
+                            } else {
+                                originalGarment.straightenedImageUrl
+                            }
                             val updatedGarment = originalGarment.copy(
                                 category = editCategory,
                                 subcategory = editSubcategory,
@@ -448,7 +508,9 @@ fun ReviewSweepScreen(onBack: () -> Unit) {
                                 price = editPrice.toDoubleOrNull() ?: originalGarment.price,
                                 material = editMaterial,
                                 fit = editFit,
-                                formalityScore = editFormality
+                                formalityScore = editFormality,
+                                imageUrl = finalImageUrl,
+                                straightenedImageUrl = finalStraightenedImageUrl
                             )
                             // Update in repo database
                             ClosetRepository.editIngestedGarment(item.id, updatedGarment)

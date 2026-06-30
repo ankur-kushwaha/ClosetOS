@@ -8,6 +8,7 @@ import torchvision.transforms as T
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any
+import cv2
 
 # Hugging Face imports
 from transformers import (
@@ -22,6 +23,10 @@ from transformers import (
 
 app = FastAPI(title="WardrobeOS Digitization Pipeline Backend")
 
+# Detection model configuration: "florence" or "dino"
+DETECTION_MODEL = "dino"
+print(f"Active object detection model: {DETECTION_MODEL}")
+
 # Detect device
 device = "cuda" if torch.cuda.is_available() else "cpu"
 if device == "cpu" and torch.backends.mps.is_available():
@@ -29,9 +34,17 @@ if device == "cpu" and torch.backends.mps.is_available():
 print(f"Using ML acceleration device: {device}")
 
 # ----------------- LOAD MODELS -----------------
-print("Loading Grounding DINO...")
-dino_processor = AutoProcessor.from_pretrained("IDEA-Research/grounding-dino-tiny")
-dino_model = AutoModelForZeroShotObjectDetection.from_pretrained("IDEA-Research/grounding-dino-tiny").to(device)
+# Grounding DINO is lazy-loaded to conserve GPU/VRAM
+dino_processor = None
+dino_model = None
+
+def get_dino_model():
+    global dino_processor, dino_model
+    if dino_model is None:
+        print("Loading Grounding DINO (lazy loading)...")
+        dino_processor = AutoProcessor.from_pretrained("IDEA-Research/grounding-dino-tiny")
+        dino_model = AutoModelForZeroShotObjectDetection.from_pretrained("IDEA-Research/grounding-dino-tiny").to(device)
+    return dino_processor, dino_model
 
 print("Loading SAM (Segment Anything)...")
 sam_model = SamModel.from_pretrained("facebook/sam-vit-base").to(device)
@@ -86,6 +99,67 @@ def calculate_iou(box1, box2):
         return 0.0
     return intersection / union
 
+def straighten_garment(rgba_np, binary_mask, category):
+    try:
+        # Get coordinates where mask is True
+        y_indices, x_indices = np.where(binary_mask)
+        if len(y_indices) == 0:
+            return rgba_np
+
+        # Stack coordinates as (x, y) for OpenCV
+        pts = np.stack([x_indices, y_indices], axis=1).astype(np.int32)
+        
+        # Find the minimum area rectangle
+        rect = cv2.minAreaRect(pts)
+        (cx, cy), (w, h), angle = rect
+
+        # Determine target orientation:
+        # Shoes are typically horizontal (w > h).
+        # Other garments (Top, Bottom, Outerwear, Dress, etc.) are vertical (h > w).
+        if category == "Shoes":
+            if w >= h:
+                rot_angle = angle
+            else:
+                rot_angle = angle - 90
+        else:
+            if h >= w:
+                rot_angle = angle
+            else:
+                rot_angle = angle + 90
+
+        # Perform the rotation around the center of the bounding box
+        h_img, w_img = rgba_np.shape[:2]
+        M = cv2.getRotationMatrix2D((cx, cy), rot_angle, 1.0)
+        
+        # Rotate both image and mask
+        rotated_rgba = cv2.warpAffine(
+            rgba_np, M, (w_img, h_img), 
+            flags=cv2.INTER_LANCZOS4, 
+            borderMode=cv2.BORDER_CONSTANT, 
+            borderValue=(0, 0, 0, 0)
+        )
+        rotated_mask = cv2.warpAffine(
+            (binary_mask * 255).astype(np.uint8), M, (w_img, h_img), 
+            flags=cv2.INTER_NEAREST, 
+            borderMode=cv2.BORDER_CONSTANT, 
+            borderValue=0
+        )
+
+        # Find the bounding box of the rotated mask to crop it tightly
+        y_indices_rot, x_indices_rot = np.where(rotated_mask > 0)
+        if len(y_indices_rot) == 0:
+            return rgba_np
+            
+        ymin, xmin = y_indices_rot.min(), x_indices_rot.min()
+        ymax, xmax = y_indices_rot.max(), x_indices_rot.max()
+
+        # Crop the rotated image
+        cropped = rotated_rgba[ymin:ymax+1, xmin:xmax+1]
+        return cropped
+    except Exception as e:
+        print(f"Error in straighten_garment: {e}")
+        return rgba_np
+
 @app.post("/digitize")
 async def digitize(file: UploadFile = File(...)):
     try:
@@ -93,38 +167,66 @@ async def digitize(file: UploadFile = File(...)):
         image = Image.open(io.BytesIO(contents)).convert("RGB")
         width, height = image.size
         
-        # 1. GROUNDING DINO: Detect bounding boxes for garments
-        print("Running Grounding DINO...")
-        # Grounding DINO expects dot-separated phrases for zero-shot detection.
-        garment_prompt = "clothing . garment . dress . shirt . jacket . pants . shoes . coat . skirt . top . blouse . shorts ."
-        inputs = dino_processor(images=image, text=garment_prompt, return_tensors="pt").to(device)
-        with torch.no_grad():
-            outputs = dino_model(**inputs)
-        
-        # Lower thresholds to 0.15 to ensure we detect clothing items in busy pictures
-        results = dino_processor.post_process_grounded_object_detection(
-            outputs,
-            inputs.input_ids,
-            box_threshold=0.15,
-            text_threshold=0.15,
-            target_sizes=[image.size[::-1]]
-        )[0]
-        
-        # Determine target bounding boxes (all detections >= 0.15 score, filtered by IoU NMS)
+        # 1. OBJECT DETECTION: Detect bounding boxes for garments
         boxes_to_process = []
-        if len(results["boxes"]) > 0:
-            scores = results["scores"].cpu().numpy()
+        if DETECTION_MODEL == "florence":
+            print("Running Florence-2 for object detection...")
+            
+            # Layer 1: Specific Phrase Grounding (behaves like Grounding DINO)
+            task_prompt = "<CAPTION_TO_PHRASE_GROUNDING>"
+            garment_prompt = "clothing . garment . dress . shirt . jacket . pants . shoes . coat . skirt . top . blouse . shorts . jeans . t-shirt . sweater"
+            florence_inputs = florence_processor(text=task_prompt + garment_prompt, images=image, return_tensors="pt").to(device)
+            with torch.no_grad():
+                generated_ids = florence_model.generate(
+                    input_ids=florence_inputs["input_ids"],
+                    pixel_values=florence_inputs["pixel_values"],
+                    max_new_tokens=1024,
+                    num_beams=3
+                )
+            generated_text = florence_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+            od_results = florence_processor.post_process_generation(
+                generated_text, 
+                task=task_prompt, 
+                image_size=image.size
+            )
+            parsed_od = od_results.get(task_prompt, {"bboxes": [], "labels": []})
+            bboxes = parsed_od.get("bboxes", [])
+            labels = parsed_od.get("labels", [])
+            
+            # Layer 2: General Object Detection <OD> Fallback if no phrase grounding items are found
+            if len(bboxes) == 0:
+                print("Florence-2 phrase grounding returned no bboxes. Falling back to general <OD>...")
+                task_prompt = "<OD>"
+                florence_inputs = florence_processor(text=task_prompt, images=image, return_tensors="pt").to(device)
+                with torch.no_grad():
+                    generated_ids = florence_model.generate(
+                        input_ids=florence_inputs["input_ids"],
+                        pixel_values=florence_inputs["pixel_values"],
+                        max_new_tokens=1024,
+                        num_beams=3
+                    )
+                generated_text = florence_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                od_results = florence_processor.post_process_generation(
+                    generated_text, 
+                    task=task_prompt, 
+                    image_size=image.size
+                )
+                parsed_od = od_results.get(task_prompt, {"bboxes": [], "labels": []})
+                bboxes = parsed_od.get("bboxes", [])
+                labels = parsed_od.get("labels", [])
+            
+            clothing_words = ["clothing", "garment", "dress", "shirt", "jacket", "pants", "shoes", "coat", "skirt", "top", "blouse", "shorts", "jeans", "t-shirt", "suit", "cardigan", "sweater", "trousers", "sock"]
             detected = []
-            for idx, score in enumerate(scores):
-                if score >= 0.15:
-                    box = results["boxes"][idx].cpu().numpy().tolist()
-                    label = results["labels"][idx]
-                    detected.append((box, label, score))
+            for box, label in zip(bboxes, labels):
+                lbl = label.lower()
+                is_clothing = any(word in lbl for word in clothing_words)
+                if is_clothing or len(bboxes) <= 3:
+                    detected.append((box, label, 1.0))
             
-            # Sort by score descending
-            detected.sort(key=lambda x: x[2], reverse=True)
+            # Sort by area descending (largest items first)
+            detected.sort(key=lambda x: (x[0][2] - x[0][0]) * (x[0][3] - x[0][1]), reverse=True)
             
-            # Simple IoU non-maximum suppression to prevent duplicates
+            # IoU non-maximum suppression
             filtered = []
             for item in detected:
                 box = item[0]
@@ -135,11 +237,49 @@ async def digitize(file: UploadFile = File(...)):
                         break
                 if not overlap:
                     filtered.append(item)
+            boxes_to_process = filtered[:5]
             
-            boxes_to_process = filtered[:5] # Max 5 garments
+        else: # Grounding DINO fallback
+            print("Running Grounding DINO (Fallback)...")
+            dino_proc, dino_mod = get_dino_model()
+            garment_prompt = "clothing . garment . dress . shirt . jacket . pants . shoes . coat . skirt . top . blouse . shorts ."
+            inputs = dino_proc(images=image, text=garment_prompt, return_tensors="pt").to(device)
+            with torch.no_grad():
+                outputs = dino_mod(**inputs)
             
+            results = dino_proc.post_process_grounded_object_detection(
+                outputs,
+                inputs.input_ids,
+                box_threshold=0.15,
+                text_threshold=0.15,
+                target_sizes=[image.size[::-1]]
+            )[0]
+            
+            if len(results["boxes"]) > 0:
+                scores = results["scores"].cpu().numpy()
+                detected = []
+                for idx, score in enumerate(scores):
+                    if score >= 0.15:
+                        box = results["boxes"][idx].cpu().numpy().tolist()
+                        label = results["labels"][idx]
+                        detected.append((box, label, score))
+                
+                detected.sort(key=lambda x: x[2], reverse=True)
+                
+                filtered = []
+                for item in detected:
+                    box = item[0]
+                    overlap = False
+                    for accepted in filtered:
+                        if calculate_iou(box, accepted[0]) > 0.45:
+                            overlap = True
+                            break
+                    if not overlap:
+                        filtered.append(item)
+                boxes_to_process = filtered[:5]
+                
         if len(boxes_to_process) == 0:
-            print("Grounding DINO did not find specific items, using center fallback")
+            print("No items detected, using center fallback")
             box = [width * 0.1, height * 0.1, width * 0.9, height * 0.9]
             boxes_to_process = [(box, "clothing", 1.0)]
 
@@ -182,8 +322,8 @@ async def digitize(file: UploadFile = File(...)):
             cropped_rgba = Image.fromarray(rgba_image).crop((xmin, ymin, xmax, ymax))
             
             max_size = 1024
+            resample_filter = Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.ANTIALIAS
             if max(cropped_rgba.size) > max_size:
-                resample_filter = Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.ANTIALIAS
                 cropped_rgba.thumbnail((max_size, max_size), resample_filter)
             
             buffered = io.BytesIO()
@@ -270,8 +410,20 @@ async def digitize(file: UploadFile = File(...)):
             
             seasons = ["Spring", "Summer", "Autumn"] if category != "Outerwear" else ["Autumn", "Winter", "Spring"]
             
+            # Create straightened garment
+            print("Straightening garment...")
+            straightened_np = straighten_garment(rgba_image, binary_mask, category)
+            straightened_rgba = Image.fromarray(straightened_np)
+            if max(straightened_rgba.size) > max_size:
+                straightened_rgba.thumbnail((max_size, max_size), resample_filter)
+                
+            buffered_straight = io.BytesIO()
+            straightened_rgba.save(buffered_straight, format="PNG")
+            straightened_img_str = base64.b64encode(buffered_straight.getvalue()).decode("utf-8")
+
             garment_data = {
                 "image_base64": img_str,
+                "straightened_image_base64": straightened_img_str,
                 "attributes": {
                     "category": category,
                     "subcategory": subcategory,

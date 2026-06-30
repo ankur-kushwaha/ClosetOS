@@ -26,6 +26,7 @@ data class Garment(
     val price: Double = 0.0,
     val brand: String = "Unknown",
     val imageUrl: String = "", // Used to load the segmented RGBA PNG
+    val straightenedImageUrl: String = "", // Transparent PNG of straightened/aligned garment
     val embedding: FloatArray = FloatArray(512), // Marqo-FashionSigLIP (512-d)
     val costPerWear: Double = price,
     val wearCount: Int = 0,

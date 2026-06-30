@@ -9,3 +9,4 @@ python-multipart==0.0.9
 numpy==1.26.4
 timm>=0.9.0
 einops>=0.7.0
+opencv-python-headless

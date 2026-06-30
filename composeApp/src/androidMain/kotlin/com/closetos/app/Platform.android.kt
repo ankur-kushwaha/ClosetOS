@@ -214,6 +214,7 @@ private suspend fun uploadImageToBackend(context: Context, imagePath: String): L
                 for (i in 0 until garmentsArray.length()) {
                     val gObj = garmentsArray.getJSONObject(i)
                     val base64Img = gObj.getString("image_base64")
+                    val straightenedBase64Img = gObj.optString("straightened_image_base64", base64Img)
                     val attr = gObj.getJSONObject("attributes")
 
                     println("Ingestion: Decoding base64 cropped image $i (length: ${base64Img.length})...")
@@ -223,6 +224,12 @@ private suspend fun uploadImageToBackend(context: Context, imagePath: String): L
                         fos.write(pngBytes)
                     }
                     println("Ingestion: Saved transparent image $i to ${croppedFile.absolutePath}")
+
+                    val straightenedPngBytes = Base64.decode(straightenedBase64Img, Base64.DEFAULT)
+                    val straightenedFile = File(context.filesDir, "straightened_server_${System.currentTimeMillis()}_$i.png")
+                    FileOutputStream(straightenedFile).use { fos ->
+                        fos.write(straightenedPngBytes)
+                    }
 
                     val embedArray = attr.getJSONArray("embedding")
                     val embedding = FloatArray(512) { embedArray.getDouble(it).toFloat() }
@@ -247,6 +254,7 @@ private suspend fun uploadImageToBackend(context: Context, imagePath: String): L
                         brand = attr.optString("brand", "Unknown"),
                         price = attr.optDouble("price", 0.0),
                         imageUrl = croppedFile.absolutePath,
+                        straightenedImageUrl = straightenedFile.absolutePath,
                         embedding = embedding
                     )
                     parsedGarments.add(garment)
