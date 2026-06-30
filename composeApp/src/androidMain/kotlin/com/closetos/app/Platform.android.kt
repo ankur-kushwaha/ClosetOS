@@ -150,76 +150,28 @@ actual fun rememberImagePickerLauncher(onResult: (List<String>) -> Unit): () -> 
 
 // --- Platform Extraction Implementation ---
 
-actual suspend fun runImageExtraction(path: String): Garment? {
+actual suspend fun runImageExtraction(path: String): List<Garment>? {
     val context = PlatformStorage.applicationContext ?: return null
-    
-    val serverGarment = uploadImageToBackend(context, path)
-    if (serverGarment != null) return serverGarment
-    
-    return withContext(Dispatchers.Default) {
-        val isRealFile = path.startsWith("/") || path.contains(".")
-        val croppedPath = if (isRealFile) {
-            cropAndSegmentGarmentImage(context, path)
-        } else {
-            path
-        }
-        
-        val template = garmentTemplates.firstOrNull {
-            path.contains(it.subcategory.replace(" ", "").lowercase()) ||
-            path.contains(it.category.lowercase()) ||
-            path.contains(it.material.lowercase())
-        } ?: garmentTemplates.firstOrNull {
-            path.contains("shirt") && it.category == "Top"
-        } ?: garmentTemplates.firstOrNull {
-            (path.contains("pants") || path.contains("trousers") || path.contains("jeans")) && it.category == "Bottom"
-        } ?: garmentTemplates.firstOrNull {
-            (path.contains("blazer") || path.contains("jacket") || path.contains("coat")) && it.category == "Outerwear"
-        } ?: garmentTemplates.firstOrNull {
-            (path.contains("loafers") || path.contains("sneakers") || path.contains("shoes")) && it.category == "Shoes"
-        } ?: garmentTemplates[0]
-
-        var detectedColorName = "Classic Black"
-        var detectedLabColor = floatArrayOf(20f, 0f, 0f)
-        if (isRealFile) {
-            val avgColor = calculateAverageColor(croppedPath)
-            detectedColorName = getColorNameFromRgb(avgColor)
-            detectedLabColor = rgbToLab(avgColor)
-        }
-        
-        val embedding = FloatArray(512).apply {
-            for (i in indices) this[i] = (Math.random() * 0.05).toFloat()
-            this[template.category.hashCode().let { if (it < 0) -it else it } % 512] = 0.8f
-            this[template.subcategory.hashCode().let { if (it < 0) -it else it } % 512] = 0.6f
-            this[detectedColorName.hashCode().let { if (it < 0) -it else it } % 512] = 0.7f
-        }
-        
-        Garment(
-            category = template.category,
-            subcategory = template.subcategory,
-            colorName = detectedColorName,
-            labColor = detectedLabColor,
-            material = template.material,
-            pattern = template.pattern,
-            fit = template.fit,
-            seasons = template.seasons,
-            formalityScore = template.formalityScore,
-            silhouette = template.silhouette,
-            price = template.price,
-            brand = template.brand + " (Local Fallback)",
-            imageUrl = croppedPath,
-            embedding = embedding
-        )
-    }
+    return uploadImageToBackend(context, path)
 }
 
-private suspend fun uploadImageToBackend(context: Context, imagePath: String): Garment? {
+private suspend fun uploadImageToBackend(context: Context, imagePath: String): List<Garment>? {
     return withContext(Dispatchers.IO) {
         var connection: java.net.HttpURLConnection? = null
         try {
             val file = File(imagePath)
             if (!file.exists()) return@withContext null
 
-            val url = java.net.URL("http://10.0.2.2:8000/digitize")
+            val savedIp = PlatformStorage.loadString("backend_ip")?.trim() ?: "http://10.0.2.2:8000"
+            val baseUrl = if (savedIp.startsWith("http://") || savedIp.startsWith("https://")) {
+                savedIp
+            } else {
+                "http://$savedIp"
+            }
+            val fullUrl = if (baseUrl.endsWith("/digitize")) baseUrl else "${baseUrl.trimEnd('/')}/digitize"
+
+            println("Ingestion: Connecting to backend server: $fullUrl")
+            val url = java.net.URL(fullUrl)
             connection = url.openConnection() as java.net.HttpURLConnection
             val boundary = "===Boundary-${System.currentTimeMillis()}==="
             
@@ -249,43 +201,58 @@ private suspend fun uploadImageToBackend(context: Context, imagePath: String): G
             }
 
             val responseCode = connection.responseCode
+            println("Ingestion: Response code from backend: $responseCode")
             if (responseCode == java.net.HttpURLConnection.HTTP_OK) {
+                println("Ingestion: Reading response stream...")
                 val jsonResponse = connection.inputStream.bufferedReader().use { it.readText() }
+                println("Ingestion: Received response body length: ${jsonResponse.length}")
+                
                 val root = JSONObject(jsonResponse)
-                val base64Img = root.getString("image_base64")
-                val attr = root.getJSONObject("attributes")
+                val garmentsArray = root.getJSONArray("garments")
+                val parsedGarments = mutableListOf<Garment>()
+                
+                for (i in 0 until garmentsArray.length()) {
+                    val gObj = garmentsArray.getJSONObject(i)
+                    val base64Img = gObj.getString("image_base64")
+                    val attr = gObj.getJSONObject("attributes")
 
-                val pngBytes = Base64.decode(base64Img, Base64.DEFAULT)
-                val croppedFile = File(context.filesDir, "cropped_server_${System.currentTimeMillis()}.png")
-                FileOutputStream(croppedFile).use { fos ->
-                    fos.write(pngBytes)
+                    println("Ingestion: Decoding base64 cropped image $i (length: ${base64Img.length})...")
+                    val pngBytes = Base64.decode(base64Img, Base64.DEFAULT)
+                    val croppedFile = File(context.filesDir, "cropped_server_${System.currentTimeMillis()}_$i.png")
+                    FileOutputStream(croppedFile).use { fos ->
+                        fos.write(pngBytes)
+                    }
+                    println("Ingestion: Saved transparent image $i to ${croppedFile.absolutePath}")
+
+                    val embedArray = attr.getJSONArray("embedding")
+                    val embedding = FloatArray(512) { embedArray.getDouble(it).toFloat() }
+
+                    val labArray = attr.getJSONArray("labColor")
+                    val labColor = FloatArray(3) { labArray.getDouble(it).toFloat() }
+
+                    val seasonsArray = attr.getJSONArray("seasons")
+                    val seasons = List(seasonsArray.length()) { seasonsArray.getString(it) }
+
+                    val garment = Garment(
+                        category = attr.getString("category"),
+                        subcategory = attr.getString("subcategory"),
+                        colorName = attr.getString("colorName"),
+                        labColor = labColor,
+                        material = attr.getString("material"),
+                        pattern = attr.getString("pattern"),
+                        fit = attr.getString("fit"),
+                        seasons = seasons,
+                        formalityScore = attr.getDouble("formalityScore").toFloat(),
+                        silhouette = attr.getString("silhouette"),
+                        brand = attr.optString("brand", "Unknown"),
+                        price = attr.optDouble("price", 0.0),
+                        imageUrl = croppedFile.absolutePath,
+                        embedding = embedding
+                    )
+                    parsedGarments.add(garment)
                 }
-
-                val embedArray = attr.getJSONArray("embedding")
-                val embedding = FloatArray(512) { embedArray.getDouble(it).toFloat() }
-
-                val labArray = attr.getJSONArray("labColor")
-                val labColor = FloatArray(3) { labArray.getDouble(it).toFloat() }
-
-                val seasonsArray = attr.getJSONArray("seasons")
-                val seasons = List(seasonsArray.length()) { seasonsArray.getString(it) }
-
-                Garment(
-                    category = attr.getString("category"),
-                    subcategory = attr.getString("subcategory"),
-                    colorName = attr.getString("colorName"),
-                    labColor = labColor,
-                    material = attr.getString("material"),
-                    pattern = attr.getString("pattern"),
-                    fit = attr.getString("fit"),
-                    seasons = seasons,
-                    formalityScore = attr.getDouble("formalityScore").toFloat(),
-                    silhouette = attr.getString("silhouette"),
-                    brand = attr.optString("brand", "Unknown"),
-                    price = attr.optDouble("price", 0.0),
-                    imageUrl = croppedFile.absolutePath,
-                    embedding = embedding
-                )
+                println("Ingestion: Successfully parsed ${parsedGarments.size} garments from server response")
+                parsedGarments
             } else {
                 null
             }

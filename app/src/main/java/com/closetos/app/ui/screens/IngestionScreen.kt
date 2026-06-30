@@ -291,7 +291,7 @@ private suspend fun uploadImageToBackend(context: android.content.Context, image
             val file = File(imagePath)
             if (!file.exists()) return@withContext null
 
-            val url = java.net.URL("http://10.0.2.2:8000/digitize")
+            val url = java.net.URL("http://192.168.29.193:8000/digitize")
             connection = url.openConnection() as java.net.HttpURLConnection
             val boundary = "===Boundary-${System.currentTimeMillis()}==="
             

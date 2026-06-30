@@ -75,7 +75,7 @@ private val garmentTemplates = listOf(
     GarmentTemplate("Shoes", "Canvas Sneakers", "Cotton Canvas", "Plain", "Standard", "Low-top", "Common Projects", 290.0, listOf("Summer", "Spring"), 0.1f)
 )
 
-actual suspend fun runImageExtraction(path: String): Garment? {
+actual suspend fun runImageExtraction(path: String): List<Garment>? {
     kotlinx.coroutines.delay(1000) // Simulate processing time
     
     val template = garmentTemplates.firstOrNull {
@@ -102,7 +102,7 @@ actual suspend fun runImageExtraction(path: String): Garment? {
         this[detectedColorName.hashCode().let { if (it < 0) -it else it } % 512] = 0.7f
     }
     
-    return Garment(
+    return listOf(Garment(
         category = template.category,
         subcategory = template.subcategory,
         colorName = detectedColorName,
@@ -117,7 +117,7 @@ actual suspend fun runImageExtraction(path: String): Garment? {
         brand = template.brand + " (Web Mock)",
         imageUrl = "", // Fall back to template icons
         embedding = embedding
-    )
+    ))
 }
 
 actual suspend fun fetchWeatherTemp(): Pair<Float, String> {

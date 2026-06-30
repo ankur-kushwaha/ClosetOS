@@ -35,6 +35,7 @@ import com.closetos.app.ui.components.SectionHeader
 import com.closetos.app.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 
 @Composable
 fun IngestionScreen(
@@ -50,6 +51,12 @@ fun IngestionScreen(
 
     val clipboardManager = LocalClipboardManager.current
 
+    var showServerConfig by remember { mutableStateOf(false) }
+    var serverIpInput by remember {
+        mutableStateOf(PlatformStorage.loadString("backend_ip") ?: "http://10.0.2.2:8000")
+    }
+    var connectionStatus by remember { mutableStateOf("Unknown") } // "Checking", "Connected", "Failed", "Unknown"
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -60,6 +67,122 @@ fun IngestionScreen(
             title = "Digitize Closet",
             subtitle = "Add items to your virtual wardrobe via three instant on-ramps."
         )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(
+                            when (connectionStatus) {
+                                "Connected" -> Color(0xFF4CAF50)
+                                "Failed" -> Color(0xFFF44336)
+                                "Checking" -> AccentGold
+                                else -> Color.Gray
+                            }
+                        )
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Server IP: ${serverIpInput.replace("http://", "").replace("https://", "")}",
+                    fontFamily = OutfitFont,
+                    fontSize = 12.sp,
+                    color = TextMuted
+                )
+            }
+            Text(
+                text = if (showServerConfig) "Hide Config" else "Configure Server",
+                fontFamily = OutfitFont,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = AccentGold,
+                modifier = Modifier.clickable { showServerConfig = !showServerConfig }
+            )
+        }
+
+        if (showServerConfig) {
+            GlassmorphicCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                    Text(
+                        text = "Backend Server LAN IP / Port",
+                        fontFamily = OutfitFont,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = TextLight
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = serverIpInput,
+                        onValueChange = { serverIpInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextLight,
+                            unfocusedTextColor = TextLight,
+                            focusedBorderColor = AccentGold,
+                            unfocusedBorderColor = GlassBorder,
+                            cursorColor = AccentGold
+                        ),
+                        placeholder = { Text("e.g. http://192.168.1.15:8000", color = TextMuted) },
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = {
+                                connectionStatus = "Checking"
+                                scope.launch(Dispatchers.IO) {
+                                    try {
+                                        val testUrl = if (serverIpInput.startsWith("http://") || serverIpInput.startsWith("https://")) {
+                                            serverIpInput
+                                        } else {
+                                            "http://$serverIpInput"
+                                        }
+                                        val url = java.net.URL(testUrl.trimEnd('/') + "/")
+                                        val conn = url.openConnection() as java.net.HttpURLConnection
+                                        conn.connectTimeout = 3000
+                                        conn.readTimeout = 3000
+                                        conn.requestMethod = "GET"
+                                        val code = conn.responseCode
+                                        connectionStatus = if (code in 200..399 || code == 404) "Connected" else "Failed"
+                                        conn.disconnect()
+                                    } catch (e: Exception) {
+                                        connectionStatus = "Failed"
+                                    }
+                                }
+                            }
+                        ) {
+                            Text("Test Connection", color = AccentGold, fontFamily = OutfitFont, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                PlatformStorage.saveString("backend_ip", serverIpInput)
+                                showServerConfig = false
+                                showToast("Backend server IP saved!")
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGold)
+                        ) {
+                            Text("Save", color = ObsidianBg, fontFamily = OutfitFont, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+        }
 
         // Segmented Tabs
         TabRow(
@@ -163,9 +286,9 @@ private suspend fun simulateGarmentPipeline(item: IngestionItem) {
     // Step 4: Crop garment
     ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.CROP_GARMENT, 0.55f, "Crop Garment: Isolating item...")
     
-    val backendGarment = runImageExtraction(filename)
+    val backendGarments = runImageExtraction(filename)
     
-    val finalGarment = if (backendGarment != null) {
+    if (backendGarments != null && backendGarments.isNotEmpty()) {
         // Step 5: FashionCLIP
         ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.FASHION_CLIP, 0.70f, "FashionCLIP: Generating 512-dimension vector key...")
         delay(1000)
@@ -174,27 +297,33 @@ private suspend fun simulateGarmentPipeline(item: IngestionItem) {
         ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.FLORENCE_2, 0.85f, "Florence-2: Extracting rich metadata...")
         delay(800)
         
-        backendGarment
+        // Complete the first garment on the original item row
+        val firstGarment = backendGarments.first()
+        ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.READY, 1.0f, "Ingestion Pipeline Completed!", firstGarment)
+        
+        // If multiple items were detected and processed, add them to the queue as split items
+        if (backendGarments.size > 1) {
+            val remainingGarments = backendGarments.drop(1)
+            val newItems = remainingGarments.mapIndexed { idx, garment ->
+                com.closetos.app.data.model.IngestionItem(
+                    id = id + "_split_" + idx + "_" + getEpochTimeMillis(),
+                    originalImageUrl = garment.imageUrl,
+                    status = IngestionStatus.READY,
+                    progress = 1.0f,
+                    stepLabel = "Ingestion Pipeline Completed! (Split from photo)",
+                    detectedGarment = garment
+                )
+            }
+            ClosetRepository.addQueuedIngestionItems(newItems)
+        }
     } else {
-        // Return a default mock garment if extraction returns null
-        Garment(
-            category = "Top",
-            subcategory = "T-Shirt",
-            colorName = "Classic Black",
-            material = "Cotton",
-            pattern = "Plain",
-            fit = "Regular",
-            seasons = listOf("Summer"),
-            formalityScore = 0.1f,
-            silhouette = "Crewneck",
-            price = 20.0,
-            brand = "Fallback Brand",
-            imageUrl = ""
+        ClosetRepository.updateIngestionItemProgress(
+            itemId = id,
+            status = IngestionStatus.FAILED,
+            progress = 0.55f,
+            label = "Backend connection failed. Please check server status and IP configuration."
         )
     }
-    
-    // Complete
-    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.READY, 1.0f, "Ingestion Pipeline Completed!", finalGarment)
 }
 
 @Composable
@@ -286,7 +415,15 @@ fun PipelineItemRow(item: IngestionItem, onReviewClick: () -> Unit) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(GlassOverlay)
-            .border(0.5.dp, if (item.status == IngestionStatus.READY) AccentGold else GlassBorder, RoundedCornerShape(12.dp))
+            .border(
+                0.5.dp,
+                when (item.status) {
+                    IngestionStatus.READY -> AccentGold
+                    IngestionStatus.FAILED -> Color.Red
+                    else -> GlassBorder
+                },
+                RoundedCornerShape(12.dp)
+            )
             .padding(12.dp)
     ) {
         Row(
@@ -317,7 +454,11 @@ fun PipelineItemRow(item: IngestionItem, onReviewClick: () -> Unit) {
                             else -> Icons.Default.Checkroom
                         },
                         contentDescription = null,
-                        tint = if (item.status == IngestionStatus.READY) AccentGold else TextMuted
+                        tint = when (item.status) {
+                            IngestionStatus.READY -> AccentGold
+                            IngestionStatus.FAILED -> Color.Red
+                            else -> TextMuted
+                        }
                     )
                 }
             }
@@ -339,11 +480,19 @@ fun PipelineItemRow(item: IngestionItem, onReviewClick: () -> Unit) {
                     )
                     
                     Text(
-                        text = if (item.status == IngestionStatus.READY) "Review" else "${(item.progress * 100).toInt()}%",
+                        text = when (item.status) {
+                            IngestionStatus.READY -> "Review"
+                            IngestionStatus.FAILED -> "Failed"
+                            else -> "${(item.progress * 100).toInt()}%"
+                        },
                         fontFamily = OutfitFont,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (item.status == IngestionStatus.READY) AccentGold else TextMuted,
+                        color = when (item.status) {
+                            IngestionStatus.READY -> AccentGold
+                            IngestionStatus.FAILED -> Color.Red
+                            else -> TextMuted
+                        },
                         modifier = if (item.status == IngestionStatus.READY) Modifier.clickable { onReviewClick() } else Modifier
                     )
                 }
@@ -354,7 +503,11 @@ fun PipelineItemRow(item: IngestionItem, onReviewClick: () -> Unit) {
                     text = item.stepLabel,
                     fontFamily = OutfitFont,
                     fontSize = 11.sp,
-                    color = if (item.status == IngestionStatus.READY) AccentGold else TextMuted
+                    color = when (item.status) {
+                        IngestionStatus.READY -> AccentGold
+                        IngestionStatus.FAILED -> Color.Red.copy(alpha = 0.8f)
+                        else -> TextMuted
+                    }
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -372,7 +525,30 @@ fun PipelineItemRow(item: IngestionItem, onReviewClick: () -> Unit) {
                             .fillMaxHeight()
                             .fillMaxWidth(item.progress)
                             .clip(CircleShape)
-                            .background(progressBrush)
+                            .background(
+                                if (item.status == IngestionStatus.FAILED) {
+                                    Brush.linearGradient(listOf(Color.Red, Color.Red.copy(alpha = 0.5f)))
+                                } else {
+                                    progressBrush
+                                }
+                            )
+                    )
+                }
+            }
+
+            if (item.status == IngestionStatus.FAILED || item.status == IngestionStatus.READY) {
+                Spacer(modifier = Modifier.width(8.dp))
+                IconButton(
+                    onClick = {
+                        ClosetRepository.rejectIngestionItem(item.id)
+                    },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Remove item",
+                        tint = TextMuted,
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }

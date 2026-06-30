@@ -103,7 +103,8 @@ enum class IngestionStatus {
     CROP_GARMENT,
     FASHION_CLIP,
     FLORENCE_2,
-    READY
+    READY,
+    FAILED
 }
 
 data class TripPlan(

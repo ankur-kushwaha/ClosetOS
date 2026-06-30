@@ -211,6 +211,10 @@ object ClosetRepository {
         _ingestionQueue.value = _ingestionQueue.value + newItems
     }
 
+    fun addQueuedIngestionItems(items: List<IngestionItem>) {
+        _ingestionQueue.value = _ingestionQueue.value + items
+    }
+
     fun updateIngestionItemProgress(itemId: String, status: IngestionStatus, progress: Float, label: String, garment: Garment? = null) {
         _ingestionQueue.value = _ingestionQueue.value.map { item ->
             if (item.id == itemId) {
@@ -242,6 +246,18 @@ object ClosetRepository {
                 item
             }
         }
+    }
+
+    fun editGarment(updatedGarment: Garment) {
+        _garments.value = _garments.value.map { g ->
+            if (g.id == updatedGarment.id) updatedGarment else g
+        }
+        saveData()
+    }
+
+    fun deleteGarment(garmentId: String) {
+        _garments.value = _garments.value.filter { it.id != garmentId }
+        saveData()
     }
 
     fun toggleGarmentLaundry(garmentId: String) {

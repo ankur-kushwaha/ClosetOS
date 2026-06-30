@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -36,6 +37,7 @@ import com.closetos.app.ui.theme.*
 fun WardrobeScreen() {
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("All") }
+    var editingGarment by remember { mutableStateOf<Garment?>(null) }
 
     val allGarments by ClosetRepository.garments.collectAsState()
 
@@ -119,11 +121,168 @@ fun WardrobeScreen() {
                     GarmentCard(
                         garment = garment,
                         similarityScore = if (searchQuery.isNotEmpty()) score else null,
-                        onLaundryToggle = { ClosetRepository.toggleGarmentLaundry(garment.id) }
+                        onLaundryToggle = { ClosetRepository.toggleGarmentLaundry(garment.id) },
+                        onClick = { editingGarment = garment }
                     )
                 }
             }
         }
+    }
+
+    // EDIT/DELETE DIALOG
+    editingGarment?.let { garment ->
+        var editBrand by remember(garment) { mutableStateOf(garment.brand) }
+        var editPrice by remember(garment) { mutableStateOf(garment.price.toString()) }
+        var editCategory by remember(garment) { mutableStateOf(garment.category) }
+        var editSubcategory by remember(garment) { mutableStateOf(garment.subcategory) }
+        var editColorName by remember(garment) { mutableStateOf(garment.colorName) }
+        var editMaterial by remember(garment) { mutableStateOf(garment.material) }
+        var editFit by remember(garment) { mutableStateOf(garment.fit) }
+
+        AlertDialog(
+            onDismissRequest = { editingGarment = null },
+            containerColor = CharcoalSurface,
+            title = {
+                Text(
+                    text = "Edit Garment Detail",
+                    fontFamily = PlayfairFont,
+                    color = AccentGold
+                )
+            },
+            text = {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp)
+                ) {
+                    item {
+                        OutlinedTextField(
+                            value = editBrand,
+                            onValueChange = { editBrand = it },
+                            label = { Text("Brand", color = TextMuted) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    item {
+                        OutlinedTextField(
+                            value = editPrice,
+                            onValueChange = { editPrice = it },
+                            label = { Text("Price ($)", color = TextMuted) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    item {
+                        OutlinedTextField(
+                            value = editCategory,
+                            onValueChange = { editCategory = it },
+                            label = { Text("Category", color = TextMuted) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    item {
+                        OutlinedTextField(
+                            value = editSubcategory,
+                            onValueChange = { editSubcategory = it },
+                            label = { Text("Subcategory", color = TextMuted) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    item {
+                        OutlinedTextField(
+                            value = editColorName,
+                            onValueChange = { editColorName = it },
+                            label = { Text("Color Name", color = TextMuted) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    item {
+                        OutlinedTextField(
+                            value = editMaterial,
+                            onValueChange = { editMaterial = it },
+                            label = { Text("Material", color = TextMuted) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    item {
+                        OutlinedTextField(
+                            value = editFit,
+                            onValueChange = { editFit = it },
+                            label = { Text("Fit", color = TextMuted) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val parsedPrice = editPrice.toDoubleOrNull() ?: garment.price
+                        val updated = garment.copy(
+                            brand = editBrand,
+                            price = parsedPrice,
+                            category = editCategory,
+                            subcategory = editSubcategory,
+                            colorName = editColorName,
+                            material = editMaterial,
+                            fit = editFit,
+                            costPerWear = parsedPrice / if (garment.wearCount > 0) garment.wearCount.toDouble() else 1.0
+                        )
+                        ClosetRepository.editGarment(updated)
+                        editingGarment = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGold)
+                ) {
+                    Text("Save", color = ObsidianBg, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        onClick = {
+                            ClosetRepository.deleteGarment(garment.id)
+                            editingGarment = null
+                        },
+                        colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
+                    ) {
+                        Text("Delete", fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(
+                        onClick = { editingGarment = null },
+                        colors = ButtonDefaults.textButtonColors(contentColor = TextLight)
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        )
     }
 }
 
@@ -131,7 +290,8 @@ fun WardrobeScreen() {
 fun GarmentCard(
     garment: Garment,
     similarityScore: Float?,
-    onLaundryToggle: () -> Unit
+    onLaundryToggle: () -> Unit,
+    onClick: () -> Unit
 ) {
     val statusColor = when (garment.laundryStatus) {
         LaundryStatus.CLEAN -> SuccessColor
@@ -154,6 +314,7 @@ fun GarmentCard(
                 color = if (similarityScore != null && similarityScore > 0.6f) AccentGold.copy(alpha = 0.5f) else Color.Transparent,
                 shape = RoundedCornerShape(16.dp)
             )
+            .clickable { onClick() }
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
