@@ -271,32 +271,23 @@ private suspend fun simulateGarmentPipeline(item: IngestionItem) {
     val id = item.id
     val filename = item.originalImageUrl
     
-    // Step 1: Pre-flight check
-    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.PRE_FLIGHT, 0.10f, "Pre-flight: Checking size and exact duplicates...")
-    delay(800)
-    
-    // Step 2: Grounding DINO
-    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.GROUNDING_DINO, 0.25f, "Grounding DINO: Localizing garment bounding box...")
-    delay(1000)
-    
-    // Step 3: SAM2
-    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.SAM2, 0.40f, "SAM2: Generative mask segmentation...")
-    delay(1200)
-    
-    // Step 4: Crop garment
-    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.CROP_GARMENT, 0.55f, "Crop Garment: Isolating item...")
-    
-    val backendGarments = runImageExtraction(filename)
+    // Call the actual runImageExtraction with the progress callback
+    val backendGarments = runImageExtraction(filename) { statusName, progress, label ->
+        // Map server steps to UI statuses
+        val uiStatus = when (statusName) {
+            "PRE_FLIGHT" -> IngestionStatus.PRE_FLIGHT
+            "GARMENT_DETECTION" -> IngestionStatus.GROUNDING_DINO
+            "SEGMENTATION", "MASK_CLEANUP" -> IngestionStatus.SAM2
+            "BACKGROUND_REMOVAL", "WHITE_BG_COMPOSITE", "ORIGINAL_CROP", "THUMBNAIL" -> IngestionStatus.CROP_GARMENT
+            "METADATA_EXTRACTION" -> IngestionStatus.FASHION_CLIP
+            "HIRES_UPSCALE" -> IngestionStatus.FLORENCE_2
+            else -> IngestionStatus.PRE_FLIGHT
+        }
+        
+        ClosetRepository.updateIngestionItemProgress(id, uiStatus, progress, label)
+    }
     
     if (backendGarments != null && backendGarments.isNotEmpty()) {
-        // Step 5: FashionCLIP
-        ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.FASHION_CLIP, 0.70f, "FashionCLIP: Generating 512-dimension vector key...")
-        delay(1000)
-        
-        // Step 6: Florence-2
-        ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.FLORENCE_2, 0.85f, "Florence-2: Extracting rich metadata...")
-        delay(800)
-        
         // Complete the first garment on the original item row
         val firstGarment = backendGarments.first()
         ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.READY, 1.0f, "Ingestion Pipeline Completed!", firstGarment)
@@ -320,8 +311,8 @@ private suspend fun simulateGarmentPipeline(item: IngestionItem) {
         ClosetRepository.updateIngestionItemProgress(
             itemId = id,
             status = IngestionStatus.FAILED,
-            progress = 0.55f,
-            label = "Backend connection failed. Please check server status and IP configuration."
+            progress = 1.0f,
+            label = "Backend connection failed or processing failed. Please check server."
         )
     }
 }

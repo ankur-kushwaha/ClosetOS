@@ -75,8 +75,22 @@ private val garmentTemplates = listOf(
     GarmentTemplate("Shoes", "Canvas Sneakers", "Cotton Canvas", "Plain", "Standard", "Low-top", "Common Projects", 290.0, listOf("Summer", "Spring"), 0.1f)
 )
 
-actual suspend fun runImageExtraction(path: String): List<Garment>? {
-    kotlinx.coroutines.delay(1000) // Simulate processing time
+actual suspend fun runImageExtraction(
+    path: String,
+    onProgress: (status: String, progress: Float, label: String) -> Unit
+): List<Garment>? {
+    onProgress("PRE_FLIGHT", 0.1f, "Pre-flight verification...")
+    kotlinx.coroutines.delay(400)
+    onProgress("GROUNDING_DINO", 0.3f, "Florence-2: Running garment detection...")
+    kotlinx.coroutines.delay(400)
+    onProgress("SAM2", 0.5f, "SAM: Segmenting image regions...")
+    kotlinx.coroutines.delay(400)
+    onProgress("CROP_GARMENT", 0.7f, "Rembg: Removing background edges...")
+    kotlinx.coroutines.delay(400)
+    onProgress("FASHION_CLIP", 0.85f, "FashionCLIP: Attribute zero-shot tagging...")
+    kotlinx.coroutines.delay(400)
+    onProgress("FLORENCE_2", 0.95f, "RealESRGAN: Launching async upscaler...")
+    kotlinx.coroutines.delay(400)
     
     val template = garmentTemplates.firstOrNull {
         path.contains(it.subcategory.replace(" ", "").lowercase()) ||

@@ -20,7 +20,10 @@ expect fun rememberCameraLauncher(onResult: (String?) -> Unit): () -> Unit
 @Composable
 expect fun rememberImagePickerLauncher(onResult: (List<String>) -> Unit): () -> Unit
 
-expect suspend fun runImageExtraction(path: String): List<Garment>?
+expect suspend fun runImageExtraction(
+    path: String,
+    onProgress: (status: String, progress: Float, label: String) -> Unit
+): List<Garment>?
 
 expect suspend fun fetchWeatherTemp(): Pair<Float, String>
 

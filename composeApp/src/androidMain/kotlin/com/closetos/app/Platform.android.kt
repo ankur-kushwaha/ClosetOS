@@ -23,6 +23,7 @@ import com.closetos.app.data.model.LaundryStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -149,13 +150,19 @@ actual fun rememberImagePickerLauncher(onResult: (List<String>) -> Unit): () -> 
 }
 
 // --- Platform Extraction Implementation ---
-
-actual suspend fun runImageExtraction(path: String): List<Garment>? {
+actual suspend fun runImageExtraction(
+    path: String,
+    onProgress: (status: String, progress: Float, label: String) -> Unit
+): List<Garment>? {
     val context = PlatformStorage.applicationContext ?: return null
-    return uploadImageToBackend(context, path)
+    return uploadImageToBackend(context, path, onProgress)
 }
 
-private suspend fun uploadImageToBackend(context: Context, imagePath: String): List<Garment>? {
+private suspend fun uploadImageToBackend(
+    context: Context,
+    imagePath: String,
+    onProgress: (status: String, progress: Float, label: String) -> Unit
+): List<Garment>? {
     return withContext(Dispatchers.IO) {
         var connection: java.net.HttpURLConnection? = null
         try {
@@ -168,10 +175,10 @@ private suspend fun uploadImageToBackend(context: Context, imagePath: String): L
             } else {
                 "http://$savedIp"
             }
-            val fullUrl = if (baseUrl.endsWith("/digitize")) baseUrl else "${baseUrl.trimEnd('/')}/digitize"
-
-            println("Ingestion: Connecting to backend server: $fullUrl")
-            val url = java.net.URL(fullUrl)
+            
+            val startUrl = "${baseUrl.trimEnd('/')}/digitize/start"
+            println("Ingestion: Starting extraction job at: $startUrl")
+            val url = java.net.URL(startUrl)
             connection = url.openConnection() as java.net.HttpURLConnection
             val boundary = "===Boundary-${System.currentTimeMillis()}==="
             
@@ -179,8 +186,8 @@ private suspend fun uploadImageToBackend(context: Context, imagePath: String): L
             connection.doInput = true
             connection.useCaches = false
             connection.requestMethod = "POST"
-            connection.connectTimeout = 30000
-            connection.readTimeout = 60000
+            connection.connectTimeout = 15000
+            connection.readTimeout = 15000
             connection.setRequestProperty("Connection", "Keep-Alive")
             connection.setRequestProperty("User-Agent", "Android Ingest")
             connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
@@ -200,70 +207,128 @@ private suspend fun uploadImageToBackend(context: Context, imagePath: String): L
                 writer.append("--$boundary--").append("\r\n").flush()
             }
 
-            val responseCode = connection.responseCode
-            println("Ingestion: Response code from backend: $responseCode")
-            if (responseCode == java.net.HttpURLConnection.HTTP_OK) {
-                println("Ingestion: Reading response stream...")
-                val jsonResponse = connection.inputStream.bufferedReader().use { it.readText() }
-                println("Ingestion: Received response body length: ${jsonResponse.length}")
-                
-                val root = JSONObject(jsonResponse)
-                val garmentsArray = root.getJSONArray("garments")
-                val parsedGarments = mutableListOf<Garment>()
-                
-                for (i in 0 until garmentsArray.length()) {
-                    val gObj = garmentsArray.getJSONObject(i)
-                    val base64Img = gObj.getString("image_base64")
-                    val straightenedBase64Img = gObj.optString("straightened_image_base64", base64Img)
-                    val attr = gObj.getJSONObject("attributes")
-
-                    println("Ingestion: Decoding base64 cropped image $i (length: ${base64Img.length})...")
-                    val pngBytes = Base64.decode(base64Img, Base64.DEFAULT)
-                    val croppedFile = File(context.filesDir, "cropped_server_${System.currentTimeMillis()}_$i.png")
-                    FileOutputStream(croppedFile).use { fos ->
-                        fos.write(pngBytes)
-                    }
-                    println("Ingestion: Saved transparent image $i to ${croppedFile.absolutePath}")
-
-                    val straightenedPngBytes = Base64.decode(straightenedBase64Img, Base64.DEFAULT)
-                    val straightenedFile = File(context.filesDir, "straightened_server_${System.currentTimeMillis()}_$i.png")
-                    FileOutputStream(straightenedFile).use { fos ->
-                        fos.write(straightenedPngBytes)
-                    }
-
-                    val embedArray = attr.getJSONArray("embedding")
-                    val embedding = FloatArray(512) { embedArray.getDouble(it).toFloat() }
-
-                    val labArray = attr.getJSONArray("labColor")
-                    val labColor = FloatArray(3) { labArray.getDouble(it).toFloat() }
-
-                    val seasonsArray = attr.getJSONArray("seasons")
-                    val seasons = List(seasonsArray.length()) { seasonsArray.getString(it) }
-
-                    val garment = Garment(
-                        category = attr.getString("category"),
-                        subcategory = attr.getString("subcategory"),
-                        colorName = attr.getString("colorName"),
-                        labColor = labColor,
-                        material = attr.getString("material"),
-                        pattern = attr.getString("pattern"),
-                        fit = attr.getString("fit"),
-                        seasons = seasons,
-                        formalityScore = attr.getDouble("formalityScore").toFloat(),
-                        silhouette = attr.getString("silhouette"),
-                        brand = attr.optString("brand", "Unknown"),
-                        price = attr.optDouble("price", 0.0),
-                        imageUrl = croppedFile.absolutePath,
-                        straightenedImageUrl = straightenedFile.absolutePath,
-                        embedding = embedding
-                    )
-                    parsedGarments.add(garment)
-                }
-                println("Ingestion: Successfully parsed ${parsedGarments.size} garments from server response")
-                parsedGarments
-            } else {
-                null
+            val startResponseCode = connection.responseCode
+            if (startResponseCode != java.net.HttpURLConnection.HTTP_OK) {
+                println("Ingestion: Start job failed with code $startResponseCode")
+                return@withContext null
             }
+
+            val startJsonResponse = connection.inputStream.bufferedReader().use { it.readText() }
+            val startRoot = JSONObject(startJsonResponse)
+            val jobId = startRoot.getString("job_id")
+            println("Ingestion: Successfully started job: $jobId")
+            connection.disconnect()
+
+            var isRunning = true
+            var retryCount = 0
+            val maxRetries = 180 // 180 * 1000ms = 3 minutes max wait time
+            var finalGarments: List<Garment>? = null
+
+            while (isRunning && retryCount < maxRetries) {
+                delay(1000)
+                retryCount++
+
+                val statusUrl = "${baseUrl.trimEnd('/')}/digitize/jobs/$jobId"
+                val pollUrl = java.net.URL(statusUrl)
+                var pollConn: java.net.HttpURLConnection? = null
+                try {
+                    pollConn = pollUrl.openConnection() as java.net.HttpURLConnection
+                    pollConn.requestMethod = "GET"
+                    pollConn.connectTimeout = 5000
+                    pollConn.readTimeout = 5000
+
+                    val code = pollConn.responseCode
+                    if (code == java.net.HttpURLConnection.HTTP_OK) {
+                        val pollJson = pollConn.inputStream.bufferedReader().use { it.readText() }
+                        val root = JSONObject(pollJson)
+                        val status = root.getString("status")
+                        
+                        val currentStep = root.optString("current_step", "PRE_FLIGHT")
+                        val progress = root.optDouble("progress", 0.0).toFloat()
+                        
+                        val stepsArray = root.optJSONArray("steps")
+                        var stepLabel = "Processing clothing item..."
+                        if (stepsArray != null) {
+                            for (j in 0 until stepsArray.length()) {
+                                val sObj = stepsArray.getJSONObject(j)
+                                if (sObj.getString("name") == currentStep) {
+                                    stepLabel = sObj.optString("label", stepLabel)
+                                    break
+                                }
+                            }
+                        }
+
+                        println("Ingestion poll: $currentStep ($progress) - $stepLabel")
+                        
+                        onProgress(currentStep, progress, stepLabel)
+
+                        if (status == "completed") {
+                            isRunning = false
+                            val garmentsArray = root.getJSONArray("garments")
+                            val parsedGarments = mutableListOf<Garment>()
+                            
+                            for (i in 0 until garmentsArray.length()) {
+                                val gObj = garmentsArray.getJSONObject(i)
+                                val base64Img = gObj.getString("image_base64")
+                                val straightenedBase64Img = gObj.optString("straightened_image_base64", base64Img)
+                                val attr = gObj.getJSONObject("attributes")
+
+                                val pngBytes = Base64.decode(base64Img, Base64.DEFAULT)
+                                val croppedFile = File(context.filesDir, "cropped_server_${System.currentTimeMillis()}_$i.png")
+                                FileOutputStream(croppedFile).use { fos ->
+                                    fos.write(pngBytes)
+                                }
+
+                                val straightenedPngBytes = Base64.decode(straightenedBase64Img, Base64.DEFAULT)
+                                val straightenedFile = File(context.filesDir, "straightened_server_${System.currentTimeMillis()}_$i.png")
+                                FileOutputStream(straightenedFile).use { fos ->
+                                    fos.write(straightenedPngBytes)
+                                }
+
+                                val embedArray = attr.getJSONArray("embedding")
+                                val embedding = FloatArray(512) { embedArray.getDouble(it).toFloat() }
+
+                                val labArray = attr.getJSONArray("labColor")
+                                val labColor = FloatArray(3) { labArray.getDouble(it).toFloat() }
+
+                                val seasonsArray = attr.getJSONArray("seasons")
+                                val seasons = List(seasonsArray.length()) { seasonsArray.getString(it) }
+
+                                val garment = Garment(
+                                    category = attr.getString("category"),
+                                    subcategory = attr.getString("subcategory"),
+                                    colorName = attr.getString("colorName"),
+                                    labColor = labColor,
+                                    material = attr.getString("material"),
+                                    pattern = attr.getString("pattern"),
+                                    fit = attr.getString("fit"),
+                                    seasons = seasons,
+                                    formalityScore = attr.getDouble("formalityScore").toFloat(),
+                                    silhouette = attr.getString("silhouette"),
+                                    brand = attr.optString("brand", "Unknown"),
+                                    price = attr.optDouble("price", 0.0),
+                                    imageUrl = croppedFile.absolutePath,
+                                    straightenedImageUrl = straightenedFile.absolutePath,
+                                    embedding = embedding
+                                )
+                                parsedGarments.add(garment)
+                            }
+                            finalGarments = parsedGarments
+                        } else if (status == "failed") {
+                            isRunning = false
+                            val err = root.optString("error", "Unknown pipeline error")
+                            println("Ingestion poll: Job failed with error: $err")
+                        }
+                    } else {
+                        println("Ingestion poll: Server returned code $code")
+                    }
+                } catch (e: Exception) {
+                    println("Ingestion poll: Connection error: ${e.message}")
+                } finally {
+                    pollConn?.disconnect()
+                }
+            }
+            finalGarments
         } catch (e: Exception) {
             e.printStackTrace()
             null
