@@ -5,11 +5,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -24,7 +22,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.closetos.app.data.model.Garment
-import com.closetos.app.data.model.LaundryStatus
 import com.closetos.app.data.repository.ClosetRepository
 import com.closetos.app.rememberImageBitmap
 import com.closetos.app.ui.components.GlassmorphicCard
@@ -43,7 +40,7 @@ fun WardrobeScreen() {
 
     val filteredGarments = remember(allGarments, searchQuery, selectedCategory) {
         val searchResults = ClosetRepository.searchGarments(searchQuery)
-        
+
         searchResults.filter { (garment, _) ->
             selectedCategory == "All" || garment.category.equals(selectedCategory, ignoreCase = true)
         }
@@ -60,7 +57,6 @@ fun WardrobeScreen() {
             subtitle = "${allGarments.size} garments digitized • Graph Index active"
         )
 
-        // Semantic Search Input
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
@@ -84,7 +80,6 @@ fun WardrobeScreen() {
             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
         )
 
-        // Horizontal Category Row
         Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -121,7 +116,6 @@ fun WardrobeScreen() {
                     GarmentCard(
                         garment = garment,
                         similarityScore = if (searchQuery.isNotEmpty()) score else null,
-                        onLaundryToggle = { ClosetRepository.toggleGarmentLaundry(garment.id) },
                         onClick = { editingGarment = garment }
                     )
                 }
@@ -129,159 +123,10 @@ fun WardrobeScreen() {
         }
     }
 
-    // EDIT/DELETE DIALOG
     editingGarment?.let { garment ->
-        var editBrand by remember(garment) { mutableStateOf(garment.brand) }
-        var editPrice by remember(garment) { mutableStateOf(garment.price.toString()) }
-        var editCategory by remember(garment) { mutableStateOf(garment.category) }
-        var editSubcategory by remember(garment) { mutableStateOf(garment.subcategory) }
-        var editColorName by remember(garment) { mutableStateOf(garment.colorName) }
-        var editMaterial by remember(garment) { mutableStateOf(garment.material) }
-        var editFit by remember(garment) { mutableStateOf(garment.fit) }
-
-        AlertDialog(
-            onDismissRequest = { editingGarment = null },
-            containerColor = CharcoalSurface,
-            title = {
-                Text(
-                    text = "Edit Garment Detail",
-                    fontFamily = PlayfairFont,
-                    color = AccentGold
-                )
-            },
-            text = {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp)
-                ) {
-                    item {
-                        OutlinedTextField(
-                            value = editBrand,
-                            onValueChange = { editBrand = it },
-                            label = { Text("Brand", color = TextMuted) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                    item {
-                        OutlinedTextField(
-                            value = editPrice,
-                            onValueChange = { editPrice = it },
-                            label = { Text("Price ($)", color = TextMuted) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                    item {
-                        OutlinedTextField(
-                            value = editCategory,
-                            onValueChange = { editCategory = it },
-                            label = { Text("Category", color = TextMuted) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                    item {
-                        OutlinedTextField(
-                            value = editSubcategory,
-                            onValueChange = { editSubcategory = it },
-                            label = { Text("Subcategory", color = TextMuted) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                    item {
-                        OutlinedTextField(
-                            value = editColorName,
-                            onValueChange = { editColorName = it },
-                            label = { Text("Color Name", color = TextMuted) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                    item {
-                        OutlinedTextField(
-                            value = editMaterial,
-                            onValueChange = { editMaterial = it },
-                            label = { Text("Material", color = TextMuted) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                    item {
-                        OutlinedTextField(
-                            value = editFit,
-                            onValueChange = { editFit = it },
-                            label = { Text("Fit", color = TextMuted) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val parsedPrice = editPrice.toDoubleOrNull() ?: garment.price
-                        val updated = garment.copy(
-                            brand = editBrand,
-                            price = parsedPrice,
-                            category = editCategory,
-                            subcategory = editSubcategory,
-                            colorName = editColorName,
-                            material = editMaterial,
-                            fit = editFit,
-                            costPerWear = parsedPrice / if (garment.wearCount > 0) garment.wearCount.toDouble() else 1.0
-                        )
-                        ClosetRepository.editGarment(updated)
-                        editingGarment = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGold)
-                ) {
-                    Text("Save", color = ObsidianBg, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(
-                        onClick = {
-                            ClosetRepository.deleteGarment(garment.id)
-                            editingGarment = null
-                        },
-                        colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
-                    ) {
-                        Text("Delete", fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    TextButton(
-                        onClick = { editingGarment = null },
-                        colors = ButtonDefaults.textButtonColors(contentColor = TextLight)
-                    ) {
-                        Text("Cancel")
-                    }
-                }
-            }
+        GarmentEditBottomSheet(
+            garment = garment,
+            onDismiss = { editingGarment = null }
         )
     }
 }
@@ -290,25 +135,12 @@ fun WardrobeScreen() {
 fun GarmentCard(
     garment: Garment,
     similarityScore: Float?,
-    onLaundryToggle: () -> Unit,
     onClick: () -> Unit
 ) {
-    val statusColor = when (garment.laundryStatus) {
-        LaundryStatus.CLEAN -> SuccessColor
-        LaundryStatus.DIRTY -> ErrorColor
-        LaundryStatus.IN_LAUNDRY -> InfoBlue
-    }
-
-    val statusLabel = when (garment.laundryStatus) {
-        LaundryStatus.CLEAN -> "Clean"
-        LaundryStatus.DIRTY -> "Dirty"
-        LaundryStatus.IN_LAUNDRY -> "Laundry"
-    }
-
     GlassmorphicCard(
         modifier = Modifier
             .fillMaxWidth()
-            .height(200.dp)
+            .height(180.dp)
             .border(
                 width = 0.5.dp,
                 color = if (similarityScore != null && similarityScore > 0.6f) AccentGold.copy(alpha = 0.5f) else Color.Transparent,
@@ -320,24 +152,23 @@ fun GarmentCard(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Header: Icon category + Similarity Score indicator
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val bitmap = rememberImageBitmap(garment.imageUrl)
+                val bitmap = rememberImageBitmap(garment.straightenedImageUrl ?: garment.imageUrl)
                 if (bitmap != null) {
                     Image(
                         bitmap = bitmap,
                         contentDescription = null,
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(40.dp)
                             .clip(RoundedCornerShape(4.dp))
                     )
                 } else {
                     Icon(
-                        imageVector = when(garment.category) {
+                        imageVector = when (garment.category) {
                             "Top" -> Icons.Default.Checkroom
                             "Bottom" -> Icons.Default.Accessibility
                             "Outerwear" -> Icons.Default.Layers
@@ -360,7 +191,6 @@ fun GarmentCard(
                 }
             }
 
-            // Body info
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Text(
                     text = garment.brand,
@@ -382,60 +212,6 @@ fun GarmentCard(
                     fontSize = 11.sp,
                     color = TextMuted
                 )
-            }
-
-            // Footer info: Laundry Status + CPW stats
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Cost per wear
-                Column {
-                    Text(
-                        text = "CPW",
-                        fontFamily = OutfitFont,
-                        fontSize = 9.sp,
-                        color = TextMuted
-                    )
-                    Text(
-                        text = "$${garment.costPerWear}",
-                        fontFamily = OutfitFont,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp,
-                        color = TextLight
-                    )
-                }
-
-                // Laundry Status pill
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(statusColor.copy(alpha = 0.15f))
-                        .border(0.5.dp, statusColor.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-                        .clickable { onLaundryToggle() }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(statusColor)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = statusLabel,
-                            fontFamily = OutfitFont,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = statusColor
-                        )
-                    }
-                }
             }
         }
     }

@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.closetos.app.data.model.Garment
 import com.closetos.app.data.model.IngestionItem
 import com.closetos.app.data.model.IngestionStatus
 import com.closetos.app.data.model.generateUUID
@@ -75,6 +76,63 @@ fun ReviewSweepBottomSheet(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GarmentEditBottomSheet(
+    garment: Garment,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = ObsidianBg,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = AccentGold.copy(alpha = 0.6f)) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 24.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Edit Garment",
+                    fontFamily = PlayfairFont,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 22.sp,
+                    color = TextLight
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = TextMuted)
+                }
+            }
+
+            GarmentEditFormContent(
+                garment = garment,
+                showSplitMerge = false,
+                secondaryButtonText = "Delete",
+                primaryButtonText = "Save Changes",
+                onSecondary = {
+                    ClosetRepository.deleteGarment(garment.id)
+                    showToast("Garment removed from wardrobe.")
+                    onDismiss()
+                },
+                onPrimary = { updatedGarment ->
+                    ClosetRepository.editGarment(updatedGarment)
+                    showToast("Garment updated.")
+                    onDismiss()
+                }
+            )
+        }
+    }
+}
+
 @Composable
 fun ReviewSweepItemContent(
     item: IngestionItem,
@@ -82,14 +140,44 @@ fun ReviewSweepItemContent(
 ) {
     val garment = item.detectedGarment ?: return
 
-    var editCategory by remember(item.id) { mutableStateOf(garment.category) }
-    var editSubcategory by remember(item.id) { mutableStateOf(garment.subcategory) }
-    var editBrand by remember(item.id) { mutableStateOf(garment.brand) }
-    var editPrice by remember(item.id) { mutableStateOf(garment.price.toString()) }
-    var editMaterial by remember(item.id) { mutableStateOf(garment.material) }
-    var editFit by remember(item.id) { mutableStateOf(garment.fit) }
-    var editFormality by remember(item.id) { mutableStateOf(garment.formalityScore) }
-    var showStraightened by remember(item.id) { mutableStateOf(true) }
+    GarmentEditFormContent(
+        garment = garment,
+        showSplitMerge = true,
+        ingestionItemId = item.id,
+        secondaryButtonText = "Discard Crop",
+        primaryButtonText = "Confirm Item",
+        onSecondary = {
+            showToast("Garment Rejected. Index cleaned.")
+            ClosetRepository.rejectIngestionItem(item.id)
+            onDismiss()
+        },
+        onPrimary = { updatedGarment ->
+            showToast("Confirmed! Garment parsed & pushed live to Wardrobe Graph.")
+            ClosetRepository.editIngestedGarment(item.id, updatedGarment)
+            ClosetRepository.approveIngestionItem(item.id)
+            onDismiss()
+        }
+    )
+}
+
+@Composable
+fun GarmentEditFormContent(
+    garment: Garment,
+    showSplitMerge: Boolean,
+    ingestionItemId: String? = null,
+    secondaryButtonText: String,
+    primaryButtonText: String,
+    onSecondary: () -> Unit,
+    onPrimary: (Garment) -> Unit
+) {
+    var editCategory by remember(garment.id) { mutableStateOf(garment.category) }
+    var editSubcategory by remember(garment.id) { mutableStateOf(garment.subcategory) }
+    var editBrand by remember(garment.id) { mutableStateOf(garment.brand) }
+    var editPrice by remember(garment.id) { mutableStateOf(garment.price.toString()) }
+    var editMaterial by remember(garment.id) { mutableStateOf(garment.material) }
+    var editFit by remember(garment.id) { mutableStateOf(garment.fit) }
+    var editFormality by remember(garment.id) { mutableStateOf(garment.formalityScore) }
+    var showStraightened by remember(garment.id) { mutableStateOf(true) }
 
     Column(
         modifier = Modifier
@@ -175,56 +263,58 @@ fun ReviewSweepItemContent(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            ElegantButton(
-                text = "Split Garment",
-                onClick = {
-                    showToast("Split item into Top & Bottom! Model Retraining log queued.")
-                    val item1 = garment.copy(
-                        id = "split_g_1_" + generateUUID(),
-                        category = "Top",
-                        subcategory = "Silk Camisole",
-                        price = garment.price / 2.0
-                    )
-                    val item2 = garment.copy(
-                        id = "split_g_2_" + generateUUID(),
-                        category = "Bottom",
-                        subcategory = "Silk Midi Skirt",
-                        price = garment.price / 2.0
-                    )
-                    ClosetRepository.rejectIngestionItem(item.id)
-                    ClosetRepository.queueIngestionItems(listOf("split_crop_1.jpg", "split_crop_2.jpg"))
-                    val q = ClosetRepository.ingestionQueue.value
-                    q.takeLast(2).forEach { qItem ->
-                        ClosetRepository.updateIngestionItemProgress(
-                            qItem.id,
-                            IngestionStatus.READY,
-                            1.0f,
-                            "Split output derived.",
-                            if (qItem.originalImageUrl.contains("1")) item1 else item2
+        if (showSplitMerge && ingestionItemId != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ElegantButton(
+                    text = "Split Garment",
+                    onClick = {
+                        showToast("Split item into Top & Bottom! Model Retraining log queued.")
+                        val item1 = garment.copy(
+                            id = "split_g_1_" + generateUUID(),
+                            category = "Top",
+                            subcategory = "Silk Camisole",
+                            price = garment.price / 2.0
                         )
-                    }
-                    onDismiss()
-                },
-                isSecondary = true,
-                icon = Icons.Default.CallSplit,
-                modifier = Modifier.weight(1f)
-            )
+                        val item2 = garment.copy(
+                            id = "split_g_2_" + generateUUID(),
+                            category = "Bottom",
+                            subcategory = "Silk Midi Skirt",
+                            price = garment.price / 2.0
+                        )
+                        ClosetRepository.rejectIngestionItem(ingestionItemId)
+                        ClosetRepository.queueIngestionItems(listOf("split_crop_1.jpg", "split_crop_2.jpg"))
+                        val q = ClosetRepository.ingestionQueue.value
+                        q.takeLast(2).forEach { qItem ->
+                            ClosetRepository.updateIngestionItemProgress(
+                                qItem.id,
+                                IngestionStatus.READY,
+                                1.0f,
+                                "Split output derived.",
+                                if (qItem.originalImageUrl.contains("1")) item1 else item2
+                            )
+                        }
+                        onSecondary()
+                    },
+                    isSecondary = true,
+                    icon = Icons.Default.CallSplit,
+                    modifier = Modifier.weight(1f)
+                )
 
-            ElegantButton(
-                text = "Merge Duplicate",
-                onClick = {
-                    showToast("Merged with Ralph Lauren Oxford in Closet. Labeled training example recorded.")
-                    ClosetRepository.rejectIngestionItem(item.id)
-                    onDismiss()
-                },
-                isSecondary = true,
-                icon = Icons.Default.MergeType,
-                modifier = Modifier.weight(1f)
-            )
+                ElegantButton(
+                    text = "Merge Duplicate",
+                    onClick = {
+                        showToast("Merged with Ralph Lauren Oxford in Closet. Labeled training example recorded.")
+                        ClosetRepository.rejectIngestionItem(ingestionItemId)
+                        onSecondary()
+                    },
+                    isSecondary = true,
+                    icon = Icons.Default.MergeType,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
 
         GlassmorphicCard(modifier = Modifier.fillMaxWidth()) {
@@ -352,20 +442,15 @@ fun ReviewSweepItemContent(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             ElegantButton(
-                text = "Discard Crop",
-                onClick = {
-                    showToast("Garment Rejected. Index cleaned.")
-                    ClosetRepository.rejectIngestionItem(item.id)
-                    onDismiss()
-                },
+                text = secondaryButtonText,
+                onClick = onSecondary,
                 isSecondary = true,
                 modifier = Modifier.weight(1f)
             )
 
             ElegantButton(
-                text = "Confirm Item",
+                text = primaryButtonText,
                 onClick = {
-                    showToast("Confirmed! Garment parsed & pushed live to Wardrobe Graph.")
                     val finalImageUrl = if (showStraightened && !garment.straightenedImageUrl.isNullOrEmpty()) {
                         garment.straightenedImageUrl
                     } else {
@@ -387,9 +472,7 @@ fun ReviewSweepItemContent(
                         imageUrl = finalImageUrl,
                         straightenedImageUrl = finalStraightenedImageUrl
                     )
-                    ClosetRepository.editIngestedGarment(item.id, updatedGarment)
-                    ClosetRepository.approveIngestionItem(item.id)
-                    onDismiss()
+                    onPrimary(updatedGarment)
                 },
                 modifier = Modifier.weight(1.5f)
             )
