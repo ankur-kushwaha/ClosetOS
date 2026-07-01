@@ -36,11 +36,28 @@ data class Garment(
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other == null || other !is Garment) return false
-        return id == other.id
+        return id == other.id &&
+                category == other.category &&
+                subcategory == other.subcategory &&
+                colorName == other.colorName &&
+                material == other.material &&
+                pattern == other.pattern &&
+                fit == other.fit &&
+                formalityScore == other.formalityScore &&
+                price == other.price &&
+                brand == other.brand &&
+                imageUrl == other.imageUrl &&
+                straightenedImageUrl == other.straightenedImageUrl &&
+                laundryStatus == other.laundryStatus &&
+                wearCount == other.wearCount
     }
 
     override fun hashCode(): Int {
-        return id.hashCode()
+        var result = id.hashCode()
+        result = 31 * result + category.hashCode()
+        result = 31 * result + subcategory.hashCode()
+        result = 31 * result + brand.hashCode()
+        return result
     }
 }
 
