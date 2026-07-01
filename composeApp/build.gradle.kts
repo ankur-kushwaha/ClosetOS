@@ -111,8 +111,14 @@ tasks.named("compileKotlinWasmJs").configure {
 }
 
 tasks.configureEach {
-    if (name == "wasmJsBrowserDevelopmentWebpack" || name == "wasmJsBrowserProductionWebpack" || name == "wasmJsBrowserTest") {
+    if (name == "wasmJsBrowserDevelopmentWebpack" || 
+        name == "wasmJsBrowserProductionWebpack" || 
+        name == "wasmJsBrowserTest") {
         dependsOn(wasmJsCopySkiko)
+    }
+    if (name == "wasmJsDevelopmentExecutableCompileSync" || 
+        name == "wasmJsProductionExecutableCompileSync") {
+        finalizedBy(wasmJsCopySkiko)
     }
 }
 

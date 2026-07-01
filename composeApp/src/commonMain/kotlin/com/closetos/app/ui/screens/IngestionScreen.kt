@@ -54,8 +54,6 @@ fun IngestionScreen(
     var isFetchingLink by remember { mutableStateOf(false) }
 
     val clipboardManager = LocalClipboardManager.current
-
-    var showServerConfig by remember { mutableStateOf(false) }
     var serverIpInput by remember {
         mutableStateOf(PlatformStorage.loadString("backend_ip") ?: defaultBackendUrl())
     }
@@ -110,104 +108,28 @@ fun IngestionScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(
-                            when (connectionStatus) {
-                                "Connected" -> Color(0xFF4CAF50)
-                                "Failed" -> Color(0xFFF44336)
-                                "Checking" -> AccentGold
-                                else -> Color.Gray
-                            }
-                        )
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Server IP: ${serverIpInput.replace("http://", "").replace("https://", "")}",
-                    fontFamily = OutfitFont,
-                    fontSize = 12.sp,
-                    color = TextMuted
-                )
-            }
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(
+                        when (connectionStatus) {
+                            "Connected" -> Color(0xFF4CAF50)
+                            "Failed" -> Color(0xFFF44336)
+                            "Checking" -> AccentGold
+                            else -> Color.Gray
+                        }
+                    )
+            )
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = if (showServerConfig) "Hide Config" else "Configure Server",
+                text = "Server IP: ${serverIpInput.replace("http://", "").replace("https://", "")}",
                 fontFamily = OutfitFont,
                 fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = AccentGold,
-                modifier = Modifier.clickable { showServerConfig = !showServerConfig }
+                color = TextMuted
             )
-        }
-
-        if (showServerConfig) {
-            GlassmorphicCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 12.dp)
-            ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-                    Text(
-                        text = "Backend Server LAN IP / Port",
-                        fontFamily = OutfitFont,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        color = TextLight
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = serverIpInput,
-                        onValueChange = { serverIpInput = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextLight,
-                            unfocusedTextColor = TextLight,
-                            focusedBorderColor = AccentGold,
-                            unfocusedBorderColor = GlassBorder,
-                            cursorColor = AccentGold
-                        ),
-                        placeholder = { Text("e.g. http://192.168.1.15:8000", color = TextMuted) },
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        TextButton(
-                            onClick = {
-                                connectionStatus = "Checking"
-                                scope.launch {
-                                    connectionStatus = if (testBackendConnection(serverIpInput)) {
-                                        "Connected"
-                                    } else {
-                                        "Failed"
-                                    }
-                                }
-                            }
-                        ) {
-                            Text("Test Connection", color = AccentGold, fontFamily = OutfitFont, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(
-                            onClick = {
-                                PlatformStorage.saveString("backend_ip", serverIpInput)
-                                showServerConfig = false
-                                showToast("Backend server IP saved!")
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentGold)
-                        ) {
-                            Text("Save", color = ObsidianBg, fontFamily = OutfitFont, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
-                    }
-                }
-            }
         }
 
         // Segmented Tabs
@@ -257,12 +179,27 @@ fun IngestionScreen(
             }
         }
 
+        val cameraLauncher = rememberCameraLauncher { path ->
+            if (path != null) {
+                interactivePhotoPath = path
+                isDetectingGarments = true
+                scope.launch {
+                    val result = runGarmentDetection(path)
+                    isDetectingGarments = false
+                    detectedBoxes = result
+                }
+            } else {
+                showToast("Camera capture cancelled or failed.")
+            }
+        }
+
         // Tab Content Panel
         Box(modifier = Modifier.weight(1f)) {
             when (activeTab) {
                 0 -> BulkCameraOnramp(
                     queue = queue,
                     onSelectPhotos = { galleryLauncher() },
+                    onCapturePhoto = { cameraLauncher() },
                     onOpenSweep = { sweepItemId = it },
                     onOpenNormalizationReview = { normalizationReviewId = it },
                     onCancel = { cancelProcessing(it) },
@@ -680,32 +617,106 @@ private suspend fun simulateGarmentPipeline(item: IngestionItem) {
 fun BulkCameraOnramp(
     queue: List<IngestionItem>,
     onSelectPhotos: () -> Unit,
+    onCapturePhoto: () -> Unit,
     onOpenSweep: (String) -> Unit,
     onOpenNormalizationReview: (String) -> Unit,
     onCancel: (String) -> Unit,
     onRetry: (IngestionItem) -> Unit
 ) {
+    var showImportDialog by remember { mutableStateOf(false) }
+
     Column(modifier = Modifier.fillMaxSize()) {
         GlassmorphicCard(
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
         ) {
             Text(
-                text = "Bulk Camera-Roll Import",
+                text = "Import Images",
                 style = MaterialTheme.typography.titleLarge,
                 color = AccentGold
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Upload flatlays, hanger captures, or on-body selfies. ClosetOS automatically segments garments and removes backgrounds.",
+                text = "Upload flatlays, hanger captures, or on-body selfies to digitize them into your closet.",
                 style = MaterialTheme.typography.bodyMedium
             )
             Spacer(modifier = Modifier.height(16.dp))
             ElegantButton(
-                text = "Select from Camera Roll",
-                onClick = onSelectPhotos,
+                text = "Import Image(s)",
+                onClick = { showImportDialog = true },
                 modifier = Modifier.fillMaxWidth(),
                 icon = Icons.Default.PhotoLibrary
             )
+        }
+
+        if (showImportDialog) {
+            Dialog(
+                onDismissRequest = { showImportDialog = false }
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth(0.85f)
+                        .border(1.dp, GlassBorder, RoundedCornerShape(16.dp)),
+                    shape = RoundedCornerShape(16.dp),
+                    color = ObsidianBg
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Import Source",
+                            fontFamily = PlayfairFont,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentGold,
+                            fontSize = 18.sp,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        Text(
+                            text = "Choose how you want to add garments to your virtual wardrobe.",
+                            fontFamily = OutfitFont,
+                            color = TextMuted,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(bottom = 20.dp)
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            ElegantButton(
+                                text = "Camera",
+                                onClick = {
+                                    showImportDialog = false
+                                    onCapturePhoto()
+                                },
+                                modifier = Modifier.weight(1f),
+                                icon = Icons.Default.CameraAlt
+                            )
+                            ElegantButton(
+                                text = "Gallery",
+                                onClick = {
+                                    showImportDialog = false
+                                    onSelectPhotos()
+                                },
+                                modifier = Modifier.weight(1f),
+                                icon = Icons.Default.PhotoLibrary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        TextButton(
+                            onClick = { showImportDialog = false }
+                        ) {
+                            Text(
+                                text = "Cancel",
+                                color = TextMuted,
+                                fontFamily = OutfitFont,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         Row(

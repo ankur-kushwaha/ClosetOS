@@ -1,21 +1,49 @@
 package com.closetos.app.ui.theme
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 
-val ObsidianBg = Color(0xFF0C0C0E)
-val CharcoalSurface = Color(0xFF16161A)
-val CardSurface = Color(0xFF222228)
-val AccentGold = Color(0xFFE5C185)
-val AccentGoldMuted = Color(0xFFC8A261)
-val TextLight = Color(0xFFF5F5F7)
-val TextMuted = Color(0xFF9A9A9E)
+var isDarkThemeGlobal by mutableStateOf(false) // Default to light theme
 
-// Glassmorphism overlays
-val GlassOverlay = Color(0x12FFFFFF)
-val GlassBorder = Color(0x1AFFFFFF)
-val GoldBorder = Color(0x33E5C185)
-val ShadowColor = Color(0x40000000)
+// Airbnb Color Palette
+val AirbnbCoral = Color(0xFFFF385C)
+val AirbnbTeal = Color(0xFF008489)
+val AirbnbDarkText = Color(0xFF222222)
+val AirbnbMutedText = Color(0xFF717171)
+val AirbnbBorder = Color(0xFFEBEBEB)
+val AirbnbLightBg = Color(0xFFF7F7F7)
+
+val ObsidianBg: Color
+    get() = if (isDarkThemeGlobal) Color(0xFF121212) else AirbnbLightBg
+
+val CharcoalSurface: Color
+    get() = if (isDarkThemeGlobal) Color(0xFF222222) else Color(0xFFFFFFFF)
+
+val CardSurface: Color
+    get() = if (isDarkThemeGlobal) Color(0xFF2D2D2D) else Color(0xFFFFFFFF)
+
+val AccentGold = AirbnbCoral
+val AccentGoldMuted = Color(0xFFE03152)
+
+val TextLight: Color
+    get() = if (isDarkThemeGlobal) Color(0xFFF5F5F7) else AirbnbDarkText
+
+val TextMuted: Color
+    get() = if (isDarkThemeGlobal) Color(0xFF9A9A9E) else AirbnbMutedText
+
+// Glassmorphism replaced with flat card overlays
+val GlassOverlay: Color
+    get() = if (isDarkThemeGlobal) Color(0xFF2C2C2C) else Color(0xFFFFFFFF)
+
+val GlassBorder: Color
+    get() = if (isDarkThemeGlobal) Color(0x1AFFFFFF) else AirbnbBorder
+
+val GoldBorder = AirbnbBorder
+val ShadowColor = Color(0x0A000000) // Much softer shadows
 
 val ErrorColor = Color(0xFFCF6679)
 val SuccessColor = Color(0xFF4BB543)
-val InfoBlue = Color(0xFF4A90E2)
+val InfoBlue = AirbnbTeal
+

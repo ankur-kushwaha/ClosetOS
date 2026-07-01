@@ -212,11 +212,9 @@ fun OotdScreen() {
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(16.dp))
                             .background(
-                                Brush.verticalGradient(
-                                    listOf(Color(0xFF16161B), Color(0xFF0F0F12))
-                                )
+                                if (isDarkThemeGlobal) Color(0xFF1E1E24) else Color(0xFFF3F3F5)
                             )
-                            .border(0.5.dp, GlassBorder, RoundedCornerShape(16.dp))
+                            .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
                     ) {
                         // Watermark tag
                         Box(
@@ -224,15 +222,15 @@ fun OotdScreen() {
                                 .align(Alignment.TopEnd)
                                 .padding(12.dp)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0x33000000))
-                                .border(0.5.dp, GlassBorder, RoundedCornerShape(10.dp))
+                                .background(if (isDarkThemeGlobal) Color(0x33000000) else Color(0x1F000000))
+                                .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
                                     imageVector = Icons.Default.Security,
                                     contentDescription = null,
-                                    tint = AccentGold.copy(alpha = 0.7f),
+                                    tint = AccentGold,
                                     modifier = Modifier.size(10.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
@@ -254,7 +252,7 @@ fun OotdScreen() {
                             Icon(
                                 imageVector = Icons.Default.DirectionsRun,
                                 contentDescription = "Digital Twin Canvas",
-                                tint = AccentGold.copy(alpha = 0.15f),
+                                tint = AccentGold.copy(alpha = 0.10f),
                                 modifier = Modifier.size(140.dp)
                             )
                             
@@ -270,8 +268,8 @@ fun OotdScreen() {
                                         modifier = Modifier
                                             .size(50.dp)
                                             .clip(RoundedCornerShape(8.dp))
-                                            .background(GlassOverlay)
-                                            .border(0.5.dp, GoldBorder, RoundedCornerShape(8.dp))
+                                            .background(if (isDarkThemeGlobal) Color(0xFF2C2C2C) else Color(0xFFFFFFFF))
+                                            .border(1.dp, AirbnbBorder, RoundedCornerShape(8.dp))
                                             .padding(4.dp),
                                         contentAlignment = Alignment.Center
                                     ) {

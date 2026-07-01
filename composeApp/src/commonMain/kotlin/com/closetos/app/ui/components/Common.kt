@@ -50,28 +50,23 @@ fun GlassmorphicCard(
     useGoldBorder: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val borderBrush = if (useGoldBorder) {
-        Brush.linearGradient(listOf(AccentGold, AccentGoldMuted))
-    } else {
-        Brush.linearGradient(listOf(GlassBorder, Color(0x05FFFFFF)))
-    }
-    
-    val borderThickness = if (useGoldBorder) 1.dp else 0.5.dp
+    val borderThickness = 1.dp
+    val borderColor = if (useGoldBorder) AccentGold else GlassBorder
 
     Column(
         modifier = modifier
             .shadow(
-                elevation = 8.dp,
-                shape = RoundedCornerShape(16.dp),
+                elevation = 2.dp,
+                shape = RoundedCornerShape(12.dp),
                 ambientColor = ShadowColor,
                 spotColor = ShadowColor
             )
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(GlassOverlay)
             .border(
                 width = borderThickness,
-                brush = borderBrush,
-                shape = RoundedCornerShape(16.dp)
+                color = borderColor,
+                shape = RoundedCornerShape(12.dp)
             )
             .padding(16.dp),
         content = content
@@ -87,20 +82,18 @@ fun ElegantButton(
     isSecondary: Boolean = false,
     icon: ImageVector? = null
 ) {
-    val gradientBrush = Brush.linearGradient(
-        colors = if (enabled) {
-            listOf(AccentGold, AccentGoldMuted)
-        } else {
-            listOf(Color(0xFF333336), Color(0xFF222224))
-        }
-    )
+    val buttonBgColor = if (enabled) {
+        AccentGold
+    } else {
+        if (isDarkThemeGlobal) Color(0xFF333336) else Color(0xFFEBEBEB)
+    }
 
     if (!isSecondary) {
         Box(
             modifier = modifier
                 .height(48.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(gradientBrush)
+                .clip(RoundedCornerShape(8.dp))
+                .background(buttonBgColor)
                 .clickable(enabled = enabled, onClick = onClick)
                 .padding(horizontal = 24.dp),
             contentAlignment = Alignment.Center
@@ -113,7 +106,7 @@ fun ElegantButton(
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        tint = ObsidianBg,
+                        tint = Color.White,
                         modifier = Modifier.size(18.dp).padding(end = 6.dp)
                     )
                 }
@@ -122,21 +115,21 @@ fun ElegantButton(
                     fontFamily = OutfitFont,
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
-                    color = if (enabled) ObsidianBg else TextMuted
+                    color = if (enabled) Color.White else TextMuted
                 )
             }
         }
     } else {
-        // Gold outlined button
+        // Outlined button
         Box(
             modifier = modifier
                 .height(48.dp)
                 .border(
                     width = 1.dp,
-                    brush = Brush.linearGradient(listOf(AccentGold, AccentGoldMuted)),
-                    shape = RoundedCornerShape(24.dp)
+                    color = if (isDarkThemeGlobal) Color(0x33FFFFFF) else AirbnbBorder,
+                    shape = RoundedCornerShape(8.dp)
                 )
-                .clip(RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .clickable(enabled = enabled, onClick = onClick)
                 .padding(horizontal = 24.dp),
             contentAlignment = Alignment.Center
@@ -149,7 +142,7 @@ fun ElegantButton(
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        tint = AccentGold,
+                        tint = TextLight,
                         modifier = Modifier.size(18.dp).padding(end = 6.dp)
                     )
                 }
@@ -158,7 +151,7 @@ fun ElegantButton(
                     fontFamily = OutfitFont,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 15.sp,
-                    color = AccentGold
+                    color = TextLight
                 )
             }
         }
@@ -172,17 +165,21 @@ fun TagChip(
     isSelected: Boolean = false,
     onClick: (() -> Unit)? = null
 ) {
-    val bg = if (isSelected) AccentGold else GlassOverlay
-    val textColor = if (isSelected) ObsidianBg else TextLight
-    val borderBrush = if (isSelected) {
-        Brush.linearGradient(listOf(AccentGold, AccentGoldMuted))
+    val bg = if (isSelected) {
+        AccentGold
     } else {
-        Brush.linearGradient(listOf(GlassBorder, GlassBorder))
+        if (isDarkThemeGlobal) Color(0xFF2C2C2C) else Color(0xFFF0F0F0)
+    }
+    
+    val textColor = if (isSelected) {
+        Color.White
+    } else {
+        TextLight
     }
 
     val finalModifier = if (onClick != null) {
         modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
     } else {
         modifier
@@ -191,8 +188,12 @@ fun TagChip(
     Box(
         modifier = finalModifier
             .background(bg)
-            .border(0.5.dp, borderBrush, RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .border(
+                width = 1.dp,
+                color = if (isSelected) AccentGold else (if (isDarkThemeGlobal) Color(0x33FFFFFF) else AirbnbBorder),
+                shape = RoundedCornerShape(16.dp)
+            )
+            .padding(horizontal = 14.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -214,21 +215,22 @@ fun SectionHeader(
     Column(modifier = modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         Text(
             text = title,
-            style = MaterialTheme.typography.displayMedium,
+            style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp, fontWeight = FontWeight.Bold),
             fontFamily = PlayfairFont
         )
         if (subtitle != null) {
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = subtitle,
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextMuted
             )
         }
         Spacer(modifier = Modifier.height(12.dp))
         Divider(
-            color = GoldBorder,
-            thickness = 0.5.dp,
-            modifier = Modifier.fillMaxWidth(0.2f)
+            color = if (isDarkThemeGlobal) Color(0x1AFFFFFF) else AirbnbBorder,
+            thickness = 1.dp,
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }
@@ -265,7 +267,7 @@ fun garmentPreviewColor(labColor: FloatArray): Color {
     )
 }
 
-private fun garmentCategoryIcon(category: String): ImageVector = when (category) {
+internal fun garmentCategoryIcon(category: String): ImageVector = when (category) {
     "Top" -> Icons.Default.Checkroom
     "Bottom" -> Icons.Default.Accessibility
     "Outerwear" -> Icons.Default.Layers
@@ -392,17 +394,98 @@ fun OutfitPreviewStack(
             else -> 4
         }
     }
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        ordered.forEachIndexed { index, garment ->
-            GarmentThumbnail(
-                garment = garment,
-                modifier = Modifier
-                    .fillMaxWidth(0.72f - index * 0.04f)
-                    .aspectRatio(0.75f)
-                    .offset(y = (index * 10).dp),
-                contentScale = ContentScale.Fit,
-                cornerRadius = 12
-            )
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(8.dp))
+    ) {
+        if (ordered.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.Checkroom, contentDescription = null, tint = TextMuted)
+            }
+        } else {
+            when (ordered.size) {
+                1 -> {
+                    GarmentThumbnail(
+                        garment = ordered[0],
+                        modifier = Modifier.fillMaxSize(),
+                        cornerRadius = 8
+                    )
+                }
+                2 -> {
+                    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        GarmentThumbnail(
+                            garment = ordered[0],
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            cornerRadius = 8
+                        )
+                        GarmentThumbnail(
+                            garment = ordered[1],
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            cornerRadius = 8
+                        )
+                    }
+                }
+                3 -> {
+                    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        GarmentThumbnail(
+                            garment = ordered[0],
+                            modifier = Modifier.weight(1.2f).fillMaxHeight(),
+                            cornerRadius = 8
+                        )
+                        Column(
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            GarmentThumbnail(
+                                garment = ordered[1],
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                cornerRadius = 8
+                            )
+                            GarmentThumbnail(
+                                garment = ordered[2],
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                cornerRadius = 8
+                            )
+                        }
+                    }
+                }
+                else -> { // 4 or more
+                    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Column(
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            GarmentThumbnail(
+                                garment = ordered[0],
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                cornerRadius = 8
+                            )
+                            GarmentThumbnail(
+                                garment = ordered[1],
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                cornerRadius = 8
+                            )
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            GarmentThumbnail(
+                                garment = ordered[2],
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                cornerRadius = 8
+                            )
+                            GarmentThumbnail(
+                                garment = ordered[3],
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                cornerRadius = 8
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -425,9 +508,9 @@ fun OutfitCard(
     Column(
         modifier = modifier
             .width(cardWidth)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFF131317))
-            .border(0.5.dp, GlassBorder, RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .background(CardSurface)
+            .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
     ) {
         Box(
@@ -435,9 +518,7 @@ fun OutfitCard(
                 .fillMaxWidth()
                 .height(previewHeight)
                 .background(
-                    Brush.verticalGradient(
-                        listOf(Color(0xFF1A1A20), Color(0xFF101014))
-                    )
+                    if (isDarkThemeGlobal) Color(0xFF1E1E24) else Color(0xFFF3F3F5)
                 )
                 .padding(12.dp),
             contentAlignment = Alignment.Center
@@ -548,13 +629,9 @@ fun CollectionPlaylistCard(
     Column(
         modifier = modifier
             .width(120.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(Color(0xFF1E1E26), Color(0xFF141418))
-                )
-            )
-            .border(0.5.dp, GlassBorder, RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .background(CardSurface)
+            .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .padding(14.dp)
     ) {

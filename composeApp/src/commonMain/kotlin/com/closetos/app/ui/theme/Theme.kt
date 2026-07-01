@@ -33,9 +33,10 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun ClosetOSTheme(
-    darkTheme: Boolean = isSystemInDarkTheme() || true, // Force premium dark mode by default
+    darkTheme: Boolean = false, // Default to light theme
     content: @Composable () -> Unit
 ) {
+    isDarkThemeGlobal = darkTheme
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
 
     MaterialTheme(

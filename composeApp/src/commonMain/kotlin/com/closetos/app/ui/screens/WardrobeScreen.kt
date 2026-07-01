@@ -27,6 +27,8 @@ import com.closetos.app.rememberImageBitmap
 import com.closetos.app.ui.components.GlassmorphicCard
 import com.closetos.app.ui.components.SectionHeader
 import com.closetos.app.ui.components.TagChip
+import com.closetos.app.ui.components.garmentPreviewColor
+import com.closetos.app.ui.components.garmentCategoryIcon
 import com.closetos.app.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -137,82 +139,107 @@ fun GarmentCard(
     similarityScore: Float?,
     onClick: () -> Unit
 ) {
-    GlassmorphicCard(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(180.dp)
+            .height(230.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(CardSurface)
             .border(
-                width = 0.5.dp,
-                color = if (similarityScore != null && similarityScore > 0.6f) AccentGold.copy(alpha = 0.5f) else Color.Transparent,
-                shape = RoundedCornerShape(16.dp)
+                width = 1.dp,
+                color = if (similarityScore != null && similarityScore > 0.6f) AccentGold else GlassBorder,
+                shape = RoundedCornerShape(12.dp)
             )
             .clickable { onClick() }
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.SpaceBetween
+        // 1. Large Image Preview / Color placeholder
+        Box(
+            modifier = Modifier
+                .weight(1.3f)
+                .fillMaxWidth()
+                .background(
+                    if (garment.straightenedImageUrl.isEmpty() && garment.imageUrl.isEmpty()) {
+                        garmentPreviewColor(garment.labColor)
+                    } else {
+                        Color.Transparent
+                    }
+                ),
+            contentAlignment = Alignment.Center
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val bitmap = rememberImageBitmap(garment.straightenedImageUrl ?: garment.imageUrl)
-                if (bitmap != null) {
-                    Image(
-                        bitmap = bitmap,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                    )
-                } else {
-                    Icon(
-                        imageVector = when (garment.category) {
-                            "Top" -> Icons.Default.Checkroom
-                            "Bottom" -> Icons.Default.Accessibility
-                            "Outerwear" -> Icons.Default.Layers
-                            else -> Icons.Default.Checkroom
-                        },
-                        contentDescription = null,
-                        tint = TextMuted,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+            val imagePath = garment.straightenedImageUrl.ifEmpty { garment.imageUrl }
+            val bitmap = if (imagePath.isNotEmpty()) rememberImageBitmap(imagePath) else null
 
-                if (similarityScore != null) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = garment.subcategory,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+            } else {
+                Icon(
+                    imageVector = garmentCategoryIcon(garment.category),
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.85f),
+                    modifier = Modifier.size(36.dp)
+                )
+            }
+
+            // Floating Similarity Match Badge
+            if (similarityScore != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(AirbnbCoral)
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                ) {
                     Text(
                         text = "${(similarityScore * 100).toInt()}% match",
                         fontFamily = OutfitFont,
-                        fontSize = 11.sp,
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
-                        color = AccentGold
+                        color = Color.White
                     )
                 }
             }
+        }
 
-            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                Text(
-                    text = garment.brand,
-                    fontFamily = OutfitFont,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    color = AccentGold
-                )
-                Text(
-                    text = garment.subcategory,
-                    fontFamily = PlayfairFont,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 16.sp,
-                    color = TextLight
-                )
-                Text(
-                    text = garment.colorName,
-                    fontFamily = OutfitFont,
-                    fontSize = 11.sp,
-                    color = TextMuted
-                )
-            }
+        // 2. Text Details
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = garment.brand,
+                fontFamily = OutfitFont,
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp,
+                color = AirbnbCoral,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+            Text(
+                text = garment.subcategory,
+                fontFamily = PlayfairFont,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                color = TextLight,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+            Text(
+                text = garment.colorName,
+                fontFamily = OutfitFont,
+                fontSize = 11.sp,
+                color = TextMuted,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
         }
     }
 }
