@@ -146,5 +146,20 @@ data class TripPlan(
     val tempHigh: Float,
     val weatherCondition: String,
     val capsuleGarments: List<Garment> = emptyList(),
-    val dailyOutfits: List<Outfit> = emptyList()
+    val dailyOutfits: List<Outfit> = emptyList(),
+    val packingNotes: String = "",
+    val provider: String = "local"
+)
+
+data class TravelCapsulePlan(
+    val capsuleGarmentIds: List<String>,
+    val dailyOutfits: List<TravelDayOutfit>,
+    val packingNotes: String = "",
+    val provider: String = "local"
+)
+
+data class TravelDayOutfit(
+    val day: Int,
+    val garmentIds: List<String>,
+    val reason: String
 )

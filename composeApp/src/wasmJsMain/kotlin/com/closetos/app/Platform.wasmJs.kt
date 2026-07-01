@@ -2,7 +2,7 @@ package com.closetos.app
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.ImageBitmap
-import com.closetos.app.data.model.Garment
+import com.closetos.app.data.model.TravelCapsulePlan
 import kotlinx.browser.window
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
@@ -182,6 +182,16 @@ actual suspend fun normalizeAndFinalizeGarment(
 ): Garment? {
     return null
 }
+
+actual suspend fun generateTravelCapsule(
+    destination: String,
+    tripDays: Int,
+    tempLow: Float,
+    tempHigh: Float,
+    weatherCondition: String,
+    garments: List<Garment>,
+    preferredStyles: List<String>
+): TravelCapsulePlan? = null
 
 actual fun decodeBase64ToBitmap(base64: String): ImageBitmap? {
     return null

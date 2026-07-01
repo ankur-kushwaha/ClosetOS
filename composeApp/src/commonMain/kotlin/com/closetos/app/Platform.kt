@@ -3,6 +3,8 @@ package com.closetos.app
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.ImageBitmap
 import com.closetos.app.data.model.Garment
+import com.closetos.app.data.model.TravelCapsulePlan
+import com.closetos.app.data.model.TravelDayOutfit
 
 expect object PlatformStorage {
     fun saveString(key: String, value: String)
@@ -40,6 +42,16 @@ expect suspend fun normalizeAndFinalizeGarment(
     label: String,
     sourceImageId: String? = null
 ): Garment?
+
+expect suspend fun generateTravelCapsule(
+    destination: String,
+    tripDays: Int,
+    tempLow: Float,
+    tempHigh: Float,
+    weatherCondition: String,
+    garments: List<Garment>,
+    preferredStyles: List<String>
+): TravelCapsulePlan?
 
 expect fun decodeBase64ToBitmap(base64: String): ImageBitmap?
 

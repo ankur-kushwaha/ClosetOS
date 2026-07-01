@@ -20,6 +20,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import com.closetos.app.data.model.Garment
 import com.closetos.app.data.model.LaundryStatus
+import com.closetos.app.data.model.TravelCapsulePlan
+import com.closetos.app.data.model.TravelDayOutfit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -750,6 +752,115 @@ actual suspend fun normalizeAndFinalizeGarment(
         } finally {
             normalizeConn?.disconnect()
             finalizeConn?.disconnect()
+        }
+    }
+}
+
+private fun resolveBackendBaseUrl(): String {
+    val savedIp = PlatformStorage.loadString("backend_ip")?.trim() ?: "http://10.0.2.2:8000"
+    return if (savedIp.startsWith("http://") || savedIp.startsWith("https://")) {
+        savedIp.trimEnd('/')
+    } else {
+        "http://$savedIp".trimEnd('/')
+    }
+}
+
+actual suspend fun generateTravelCapsule(
+    destination: String,
+    tripDays: Int,
+    tempLow: Float,
+    tempHigh: Float,
+    weatherCondition: String,
+    garments: List<Garment>,
+    preferredStyles: List<String>
+): TravelCapsulePlan? {
+    return withContext(Dispatchers.IO) {
+        var connection: java.net.HttpURLConnection? = null
+        try {
+            val url = java.net.URL("${resolveBackendBaseUrl()}/travel/capsule")
+            connection = url.openConnection() as java.net.HttpURLConnection
+            connection.doOutput = true
+            connection.doInput = true
+            connection.useCaches = false
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 30_000
+            connection.readTimeout = 90_000
+            connection.setRequestProperty("Content-Type", "application/json")
+
+            val garmentsArray = org.json.JSONArray()
+            for (g in garments) {
+                val gObj = org.json.JSONObject()
+                gObj.put("id", g.id)
+                gObj.put("category", g.category)
+                gObj.put("subcategory", g.subcategory)
+                gObj.put("colorName", g.colorName)
+                gObj.put("material", g.material)
+                gObj.put("pattern", g.pattern)
+                gObj.put("fit", g.fit)
+                gObj.put("seasons", org.json.JSONArray(g.seasons))
+                gObj.put("formalityScore", g.formalityScore.toDouble())
+                gObj.put("laundryStatus", g.laundryStatus.name)
+                gObj.put("wearCount", g.wearCount)
+                gObj.put("brand", g.brand)
+                garmentsArray.put(gObj)
+            }
+
+            val payload = org.json.JSONObject()
+            payload.put("destination", destination)
+            payload.put("trip_days", tripDays)
+            payload.put("temp_low_f", tempLow.toDouble())
+            payload.put("temp_high_f", tempHigh.toDouble())
+            payload.put("weather_condition", weatherCondition)
+            payload.put("garments", garmentsArray)
+            payload.put("preferred_styles", org.json.JSONArray(preferredStyles))
+
+            connection.outputStream.use { out ->
+                out.write(payload.toString().toByteArray(charset("UTF-8")))
+                out.flush()
+            }
+
+            if (connection.responseCode != java.net.HttpURLConnection.HTTP_OK) {
+                return@withContext null
+            }
+
+            val response = connection.inputStream.bufferedReader().use { it.readText() }
+            val root = org.json.JSONObject(response)
+
+            val capsuleIds = mutableListOf<String>()
+            val capsuleArray = root.getJSONArray("capsule_garment_ids")
+            for (i in 0 until capsuleArray.length()) {
+                capsuleIds.add(capsuleArray.getString(i))
+            }
+
+            val dailyOutfits = mutableListOf<TravelDayOutfit>()
+            val dailyArray = root.getJSONArray("daily_outfits")
+            for (i in 0 until dailyArray.length()) {
+                val dayObj = dailyArray.getJSONObject(i)
+                val garmentIds = mutableListOf<String>()
+                val idsArray = dayObj.getJSONArray("garment_ids")
+                for (j in 0 until idsArray.length()) {
+                    garmentIds.add(idsArray.getString(j))
+                }
+                dailyOutfits.add(
+                    TravelDayOutfit(
+                        day = dayObj.getInt("day"),
+                        garmentIds = garmentIds,
+                        reason = dayObj.optString("reason", "")
+                    )
+                )
+            }
+
+            TravelCapsulePlan(
+                capsuleGarmentIds = capsuleIds,
+                dailyOutfits = dailyOutfits,
+                packingNotes = root.optString("packing_notes", ""),
+                provider = root.optString("provider", "backend")
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        } finally {
+            connection?.disconnect()
         }
     }
 }

@@ -33,6 +33,7 @@ import com.closetos.app.ui.components.GlassmorphicCard
 import com.closetos.app.ui.components.SectionHeader
 import com.closetos.app.ui.components.TagChip
 import com.closetos.app.ui.theme.*
+import kotlinx.coroutines.launch
 
 @Composable
 fun TripPlannerScreen() {
@@ -42,7 +43,9 @@ fun TripPlannerScreen() {
     // Input States
     var destination by remember { mutableStateOf("") }
     var tripDays by remember { mutableStateOf(4) }
-    var weatherMode by remember { mutableStateOf("Mild (55-70°F)") } // Cold, Mild, Warm
+    var weatherMode by remember { mutableStateOf("Mild (55-70°F)") }
+    var isGenerating by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -128,8 +131,8 @@ fun TripPlannerScreen() {
                 Spacer(modifier = Modifier.height(20.dp))
 
                 ElegantButton(
-                    text = "Generate Travel Capsule",
-                    enabled = destination.isNotBlank(),
+                    text = if (isGenerating) "Planning Capsule..." else "Generate Travel Capsule",
+                    enabled = destination.isNotBlank() && !isGenerating,
                     onClick = {
                         val tempLow = when {
                             weatherMode.contains("Cold") -> 42f
@@ -146,16 +149,29 @@ fun TripPlannerScreen() {
                             weatherMode.contains("Mild") -> "Partly Cloudy"
                             else -> "Clear & Sunny"
                         }
-                        
-                        ClosetRepository.generateTripPlan(
-                            destination = destination,
-                            start = getEpochTimeMillis(),
-                            end = getEpochTimeMillis() + (tripDays * 24L * 60 * 60 * 1000),
-                            tempLow = tempLow,
-                            tempHigh = tempHigh,
-                            condition = condition
-                        )
-                        showToast("Capsule generated for $destination!")
+
+                        isGenerating = true
+                        scope.launch {
+                            val plan = ClosetRepository.generateTripPlanAsync(
+                                destination = destination,
+                                start = getEpochTimeMillis(),
+                                end = getEpochTimeMillis() + (tripDays * 24L * 60 * 60 * 1000),
+                                tempLow = tempLow,
+                                tempHigh = tempHigh,
+                                condition = condition
+                            )
+                            isGenerating = false
+                            if (plan != null) {
+                                val via = when (plan.provider) {
+                                    "gpt-4o-mini" -> "GPT"
+                                    "rule-based" -> "smart rules"
+                                    else -> "local closet"
+                                }
+                                showToast("Capsule ready for $destination ($via)")
+                            } else {
+                                showToast("Need at least 3 clean garments in your closet")
+                            }
+                        }
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -163,6 +179,35 @@ fun TripPlannerScreen() {
 
             // Display Active Generated Capsule Plan
             activePlan?.let { plan ->
+                if (plan.packingNotes.isNotBlank()) {
+                    GlassmorphicCard(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = AccentGold,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Packing Notes",
+                                fontFamily = PlayfairFont,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = AccentGold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = plan.packingNotes,
+                            fontFamily = OutfitFont,
+                            fontSize = 13.sp,
+                            color = TextLight,
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+
                 // Section: Capsule items to pack
                 Text(
                     text = "Packed Capsule Wardrobe (${plan.capsuleGarments.size} items)",
@@ -271,7 +316,9 @@ fun TripPlannerScreen() {
                                         color = TextLight
                                     )
                                     Text(
-                                        text = outfit.garments.joinToString(" + ") { it.subcategory },
+                                        text = outfit.reason.ifBlank {
+                                            outfit.garments.joinToString(" + ") { it.subcategory }
+                                        },
                                         fontFamily = OutfitFont,
                                         fontSize = 12.sp,
                                         color = TextMuted

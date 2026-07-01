@@ -1,6 +1,7 @@
 package com.closetos.app.data.repository
 
 import com.closetos.app.PlatformStorage
+import com.closetos.app.generateTravelCapsule
 import com.closetos.app.getEpochTimeMillis
 import com.closetos.app.data.model.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -927,10 +928,91 @@ object ClosetRepository {
         )
     }
 
+    suspend fun generateTripPlanAsync(
+        destination: String,
+        start: Long,
+        end: Long,
+        tempLow: Float,
+        tempHigh: Float,
+        condition: String
+    ): TripPlan? {
+        val activeGarments = _garments.value.filter { it.laundryStatus == LaundryStatus.CLEAN }
+        if (activeGarments.size < 3) return null
+
+        val tripDays = ((end - start) / (24 * 60 * 60 * 1000)).toInt().coerceIn(1, 14)
+        val aiPlan = generateTravelCapsule(
+            destination = destination,
+            tripDays = tripDays,
+            tempLow = tempLow,
+            tempHigh = tempHigh,
+            weatherCondition = condition,
+            garments = activeGarments,
+            preferredStyles = _userTaste.value.preferredStyles
+        )
+
+        val plan = if (aiPlan != null) {
+            buildTripPlanFromCapsule(destination, start, end, tempLow, tempHigh, condition, activeGarments, aiPlan)
+        } else {
+            buildTripPlanLocal(destination, start, end, tempLow, tempHigh, condition, activeGarments)
+        }
+
+        _tripPlans.value = _tripPlans.value + plan
+        saveData()
+        return plan
+    }
+
     fun generateTripPlan(destination: String, start: Long, end: Long, tempLow: Float, tempHigh: Float, condition: String) {
         val activeGarments = _garments.value.filter { it.laundryStatus == LaundryStatus.CLEAN }
-        if (activeGarments.size < 5) return
+        if (activeGarments.size < 3) return
+        val plan = buildTripPlanLocal(destination, start, end, tempLow, tempHigh, condition, activeGarments)
+        _tripPlans.value = _tripPlans.value + plan
+        saveData()
+    }
 
+    private fun buildTripPlanFromCapsule(
+        destination: String,
+        start: Long,
+        end: Long,
+        tempLow: Float,
+        tempHigh: Float,
+        condition: String,
+        activeGarments: List<Garment>,
+        capsulePlan: com.closetos.app.data.model.TravelCapsulePlan
+    ): TripPlan {
+        val byId = activeGarments.associateBy { it.id }
+        val capsule = capsulePlan.capsuleGarmentIds.mapNotNull { byId[it] }
+        val dailyOutfits = capsulePlan.dailyOutfits.map { dayPlan ->
+            val garments = dayPlan.garmentIds.mapNotNull { byId[it] }
+            Outfit(
+                garments = garments,
+                reason = dayPlan.reason,
+                isAiGenerated = true,
+                bestFor = listOf("Travel", destination)
+            )
+        }
+        return TripPlan(
+            destination = destination,
+            startDate = start,
+            endDate = end,
+            tempLow = tempLow,
+            tempHigh = tempHigh,
+            weatherCondition = condition,
+            capsuleGarments = capsule,
+            dailyOutfits = dailyOutfits,
+            packingNotes = capsulePlan.packingNotes,
+            provider = capsulePlan.provider
+        )
+    }
+
+    private fun buildTripPlanLocal(
+        destination: String,
+        start: Long,
+        end: Long,
+        tempLow: Float,
+        tempHigh: Float,
+        condition: String,
+        activeGarments: List<Garment>
+    ): TripPlan {
         val capsule = mutableListOf<Garment>()
         val tops = activeGarments.filter { it.category == "Top" }.take(3)
         val bottoms = activeGarments.filter { it.category == "Bottom" }.take(2)
@@ -967,10 +1049,10 @@ object ClosetRepository {
             tempHigh = tempHigh,
             weatherCondition = condition,
             capsuleGarments = capsule,
-            dailyOutfits = dayOutfits
+            dailyOutfits = dayOutfits,
+            provider = "local"
         )
-        _tripPlans.value = _tripPlans.value + plan
-        saveData()
+        return plan
     }
 
     fun seedInitialCloset() {

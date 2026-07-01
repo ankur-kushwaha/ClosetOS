@@ -33,6 +33,7 @@ from pipeline.florence_attrs import extract_attributes
 from pipeline.fashion_clip import encode_image
 from pipeline.orchestrator import run_digitize_pipeline, create_job_steps
 from pipeline.yolo_world import detect_yolo_world
+from pipeline.travel_capsule import generate_travel_capsule
 
 app = FastAPI(title="WardrobeOS Ingestion & Try-On Pipeline Backend")
 
@@ -199,6 +200,31 @@ class FinalizePayload(BaseModel):
 class FlorencePayload(BaseModel):
     image_base64: str
     task_prompt: Optional[str] = "<MORE_DETAILED_CAPTION>"
+
+
+class TravelGarmentInput(BaseModel):
+    id: str
+    category: str
+    subcategory: str
+    colorName: str
+    material: str = ""
+    pattern: str = ""
+    fit: str = ""
+    seasons: List[str] = []
+    formalityScore: float = 0.5
+    laundryStatus: str = "CLEAN"
+    wearCount: int = 0
+    brand: str = "Unknown"
+
+
+class TravelCapsuleRequest(BaseModel):
+    destination: str
+    trip_days: int
+    temp_low_f: float
+    temp_high_f: float
+    weather_condition: str
+    garments: List[TravelGarmentInput]
+    preferred_styles: List[str] = []
 
 def clean_garment_caption(raw_caption: str) -> str:
     import re
@@ -417,6 +443,31 @@ def yolo_world_finalize(payload: FinalizePayload):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+# Travel capsule planner (GPT + rule-based fallback)
+@app.post("/travel/capsule")
+def plan_travel_capsule(payload: TravelCapsuleRequest):
+    try:
+        if not payload.garments:
+            raise HTTPException(status_code=400, detail="No garments provided")
+        garment_dicts = [g.model_dump() for g in payload.garments]
+        result = generate_travel_capsule(
+            destination=payload.destination,
+            trip_days=payload.trip_days,
+            temp_low=payload.temp_low_f,
+            temp_high=payload.temp_high_f,
+            weather_condition=payload.weather_condition,
+            garments=garment_dicts,
+            preferred_styles=payload.preferred_styles,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # 8. GET /garments - List all garments
 @app.get("/garments")
