@@ -73,7 +73,10 @@ def detect_garments(image: Image.Image, device: str, model_loaders) -> List[Tupl
     width, height = image.size
     boxes_to_process = []
 
-    if DETECTION_MODEL == "florence":
+    if DETECTION_MODEL == "yolo":
+        from .yolo_world import detect_yolo_world
+        boxes_to_process = detect_yolo_world(image, device, model_loaders, confidence=MIN_DETECTION_CONFIDENCE)
+    elif DETECTION_MODEL == "florence":
         fl_model, fl_processor = model_loaders.get_florence_model()
         task_prompt = "<CAPTION_TO_PHRASE_GROUNDING>"
         florence_inputs = fl_processor(
@@ -122,26 +125,7 @@ def detect_garments(image: Image.Image, device: str, model_loaders) -> List[Tupl
                 detected.append((box, label, 1.0))
         boxes_to_process = filter_and_nms_garments(detected, width, height)
     else:
-        d_proc, d_mod = model_loaders.get_dino_model()
-        inputs = d_proc(images=image, text=GARMENT_DETECTION_PROMPT, return_tensors="pt").to(device)
-        with torch.no_grad():
-            outputs = d_mod(**inputs)
-        results = d_proc.post_process_grounded_object_detection(
-            outputs,
-            inputs.input_ids,
-            box_threshold=MIN_DETECTION_CONFIDENCE,
-            text_threshold=MIN_DETECTION_CONFIDENCE,
-            target_sizes=[image.size[::-1]],
-        )[0]
-        if len(results["boxes"]) > 0:
-            scores = results["scores"].cpu().numpy()
-            detected = []
-            for idx, score in enumerate(scores):
-                if score >= MIN_DETECTION_CONFIDENCE:
-                    box = results["boxes"][idx].cpu().numpy().tolist()
-                    label = results["labels"][idx]
-                    detected.append((box, label, float(score)))
-            boxes_to_process = filter_and_nms_garments(detected, width, height)
+        raise ValueError(f"Unknown detection model: {DETECTION_MODEL}. Supported values are: 'yolo', 'florence'.")
 
     if len(boxes_to_process) == 0:
         box = [width * 0.1, height * 0.1, width * 0.9, height * 0.9]

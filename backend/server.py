@@ -26,12 +26,9 @@ from pipeline.config import (
     MIN_DETECTION_CONFIDENCE,
 )
 from pipeline.model_loaders import ModelLoaders
-from pipeline.grounded_sam2 import detect_garments, segment_garment
-from pipeline.quality import validate_garment
 from pipeline.normalization import normalize_garment
 from pipeline.florence_attrs import extract_attributes
 from pipeline.fashion_clip import encode_image
-from pipeline.orchestrator import run_digitize_pipeline, create_job_steps
 from pipeline.yolo_world import detect_yolo_world
 from pipeline.travel_capsule import generate_travel_capsule
 

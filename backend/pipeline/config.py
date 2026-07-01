@@ -13,8 +13,8 @@ def _env(key: str, default: str = "") -> str:
     return value.strip()
 
 
-# Detection: "dino" (Grounding DINO) or "florence"
-DETECTION_MODEL = _env("DETECTION_MODEL", "dino")
+# Detection: "yolo" (YOLO-World, default) or "florence"
+DETECTION_MODEL = _env("DETECTION_MODEL", "yolo")
 
 # Normalization: "gpt", "flux", "auto", or "none" (white-bg composite fallback)
 NORMALIZATION_PROVIDER = _env("NORMALIZATION_PROVIDER", "none")

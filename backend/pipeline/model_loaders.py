@@ -3,7 +3,6 @@
 import torch
 from transformers import (
     AutoProcessor,
-    AutoModelForZeroShotObjectDetection,
     SamModel,
     SamProcessor,
     AutoModelForCausalLM,
@@ -13,8 +12,6 @@ from transformers import (
 class ModelLoaders:
     def __init__(self, device: str):
         self.device = device
-        self._dino_processor = None
-        self._dino_model = None
         self._sam_model = None
         self._sam_processor = None
         self._florence_model = None
@@ -52,14 +49,7 @@ class ModelLoaders:
                 )
         return self._florence_model, self._florence_processor
 
-    def get_dino_model(self):
-        if self._dino_model is None:
-            print("Loading Grounding DINO...")
-            self._dino_processor = AutoProcessor.from_pretrained("IDEA-Research/grounding-dino-tiny")
-            self._dino_model = AutoModelForZeroShotObjectDetection.from_pretrained(
-                "IDEA-Research/grounding-dino-tiny"
-            ).to(self.device)
-        return self._dino_processor, self._dino_model
+
 
     def get_rembg_session(self):
         if self._rembg_session is None:
