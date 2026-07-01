@@ -87,7 +87,9 @@ data class IngestionItem(
     val status: IngestionStatus,
     val progress: Float, // 0.0 to 1.0
     val stepLabel: String,
-    val detectedGarment: Garment? = null
+    val detectedGarment: Garment? = null,
+    val label: String? = null,
+    val cropBase64: String? = null
 )
 
 enum class IngestionStatus {

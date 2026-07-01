@@ -290,6 +290,16 @@ object ClosetRepository {
         }
     }
 
+    fun updateIngestionItemCrop(itemId: String, label: String, cropBase64: String) {
+        _ingestionQueue.value = _ingestionQueue.value.map { item ->
+            if (item.id == itemId) {
+                item.copy(label = label, cropBase64 = cropBase64)
+            } else {
+                item
+            }
+        }
+    }
+
     fun approveIngestionItem(itemId: String) {
         val item = _ingestionQueue.value.find { it.id == itemId }
         item?.detectedGarment?.let { garment ->
