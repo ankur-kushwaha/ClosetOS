@@ -219,7 +219,7 @@ class MainActivity : ComponentActivity() {
                                 ) {
                                     val items = listOf(
                                         Screen.Ootd, Screen.Ingest, Screen.Wardrobe,
-                                        Screen.Builder, Screen.Travel, Screen.Resale
+                                        Screen.Builder, Screen.Travel
                                     )
                                     items.forEach { item ->
                                         NavigationBarItem(

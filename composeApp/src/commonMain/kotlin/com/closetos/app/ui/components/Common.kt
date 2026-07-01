@@ -1,11 +1,17 @@
 package com.closetos.app.ui.components
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Accessibility
+import androidx.compose.material.icons.filled.Checkroom
+import androidx.compose.material.icons.filled.Hiking
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -16,10 +22,15 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.closetos.app.data.model.Garment
+import com.closetos.app.rememberImageBitmap
 import com.closetos.app.ui.theme.*
+import kotlin.math.pow
 
 @Composable
 fun GlassmorphicCard(
@@ -206,6 +217,129 @@ fun SectionHeader(
             color = GoldBorder,
             thickness = 0.5.dp,
             modifier = Modifier.fillMaxWidth(0.2f)
+        )
+    }
+}
+
+fun garmentPreviewColor(labColor: FloatArray): Color {
+    val l = labColor.getOrElse(0) { 50f }
+    val a = labColor.getOrElse(1) { 0f }
+    val b = labColor.getOrElse(2) { 0f }
+
+    var y = (l + 16f) / 116f
+    var x = a / 500f + y
+    var z = y - b / 200f
+
+    fun f(t: Float): Float {
+        val delta = 6f / 29f
+        return if (t > delta) t.pow(3f) else 3f * delta * delta * (t - 4f / 29f)
+    }
+
+    x = 0.95047f * f(x)
+    y = 1.00000f * f(y)
+    z = 1.08883f * f(z)
+
+    var r = x * 3.2406f + y * -1.5372f + z * -0.4986f
+    var g = x * -0.9689f + y * 1.8758f + z * 0.0415f
+    var blue = x * 0.0557f + y * -0.2040f + z * 1.0570f
+
+    fun gamma(channel: Float): Float =
+        if (channel > 0.0031308f) 1.055f * channel.pow(1f / 2.4f) - 0.055f else 12.92f * channel
+
+    return Color(
+        red = gamma(r.coerceIn(0f, 1f)),
+        green = gamma(g.coerceIn(0f, 1f)),
+        blue = gamma(blue.coerceIn(0f, 1f))
+    )
+}
+
+private fun garmentCategoryIcon(category: String): ImageVector = when (category) {
+    "Top" -> Icons.Default.Checkroom
+    "Bottom" -> Icons.Default.Accessibility
+    "Outerwear" -> Icons.Default.Layers
+    "Shoes" -> Icons.Default.Hiking
+    else -> Icons.Default.Checkroom
+}
+
+@Composable
+fun GarmentThumbnail(
+    garment: Garment,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Fit,
+    showIconFallback: Boolean = true,
+    cornerRadius: Int = 8
+) {
+    val imagePath = garment.straightenedImageUrl.ifEmpty { garment.imageUrl }
+    val bitmap = if (imagePath.isNotEmpty()) rememberImageBitmap(imagePath) else null
+    val shape = RoundedCornerShape(cornerRadius.dp)
+
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap,
+            contentDescription = garment.subcategory,
+            modifier = modifier.clip(shape),
+            contentScale = contentScale
+        )
+    } else {
+        Box(
+            modifier = modifier
+                .clip(shape)
+                .background(garmentPreviewColor(garment.labColor)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (showIconFallback) {
+                Icon(
+                    imageVector = garmentCategoryIcon(garment.category),
+                    contentDescription = garment.subcategory,
+                    tint = Color.White.copy(alpha = 0.85f),
+                    modifier = Modifier.fillMaxSize(0.45f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun LookbookGarmentChip(
+    garment: Garment,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .width(88.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(GlassOverlay)
+            .border(0.5.dp, GlassBorder, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        GarmentThumbnail(
+            garment = garment,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(72.dp),
+            contentScale = ContentScale.Crop,
+            cornerRadius = 8
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = garment.subcategory,
+            fontFamily = OutfitFont,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 10.sp,
+            color = TextLight,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = garment.brand,
+            fontFamily = OutfitFont,
+            fontSize = 9.sp,
+            color = TextMuted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

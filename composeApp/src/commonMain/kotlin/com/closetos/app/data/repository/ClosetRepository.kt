@@ -200,6 +200,36 @@ object ClosetRepository {
         saveData()
     }
 
+    fun scoreLookbookOutfit(garments: List<Garment>): Outfit {
+        return scoreAndBuildOutfit(garments, "Lookbook", 70f).copy(
+            name = "Custom Lookbook Outfit"
+        )
+    }
+
+    fun saveLookbookOutfit(garments: List<Garment>): Outfit {
+        val outfit = scoreLookbookOutfit(garments)
+
+        val currentTaste = _userTaste.value
+        val currentVector = currentTaste.tasteVector
+        val outfitCentroid = FloatArray(512)
+
+        for (i in 0 until 512) {
+            var sum = 0f
+            for (g in garments) {
+                sum += g.embedding.getOrElse(i) { 0f }
+            }
+            outfitCentroid[i] = sum / garments.size
+        }
+
+        val blendedVector = FloatArray(512) { i ->
+            (currentVector.getOrElse(i) { 0f } * 0.85f) + (outfitCentroid[i] * 0.15f)
+        }
+
+        _userTaste.value = currentTaste.copy(tasteVector = blendedVector)
+        saveData()
+        return outfit
+    }
+
     fun queueIngestionItems(urls: List<String>) {
         val newItems = urls.map { url ->
             IngestionItem(
