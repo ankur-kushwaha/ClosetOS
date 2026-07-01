@@ -149,13 +149,13 @@ fun NormalizationReviewBottomSheet(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 ElegantButton(
-                    text = "Reject Normalization",
+                    text = "Use Original Crop",
                     onClick = { onAccept(false) },
                     isSecondary = true,
                     modifier = Modifier.weight(1f)
                 )
                 ElegantButton(
-                    text = "Accept Normalized",
+                    text = "Accept Normalization",
                     onClick = { onAccept(true) },
                     modifier = Modifier.weight(1.2f)
                 )

@@ -26,15 +26,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.closetos.app.*
 import com.closetos.app.data.model.*
 import com.closetos.app.data.repository.ClosetRepository
 import com.closetos.app.ui.components.ElegantButton
 import com.closetos.app.ui.components.GlassmorphicCard
-import com.closetos.app.ui.components.ImageCropDialog
 import com.closetos.app.ui.components.SectionHeader
 import com.closetos.app.ui.theme.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 @Composable
@@ -61,22 +66,33 @@ fun IngestionScreen(
     var isDetectingGarments by remember { mutableStateOf(false) }
     var sweepItemId by remember { mutableStateOf<String?>(null) }
     var normalizationReviewId by remember { mutableStateOf<String?>(null) }
-    var cropDialogPath by remember { mutableStateOf<String?>(null) }
-    var isManualUploadPick by remember { mutableStateOf(false) }
+    val pipelineJobs = remember { mutableMapOf<String, Job>() }
     val sweepItem = remember(sweepItemId, queue) {
         sweepItemId?.let { id -> queue.find { it.id == id } }
     }
     val normalizationReviewItem = remember(normalizationReviewId, queue) {
         normalizationReviewId?.let { id -> queue.find { it.id == id } }
     }
-    var autoOpenedReviewIds by remember { mutableStateOf(setOf<String>()) }
 
-    LaunchedEffect(queue) {
-        queue.filter { it.status == IngestionStatus.NORMALIZATION_REVIEW && it.id !in autoOpenedReviewIds }
-            .firstOrNull()?.let { item ->
-                normalizationReviewId = item.id
-                autoOpenedReviewIds = autoOpenedReviewIds + item.id
+    fun cancelProcessing(itemId: String) {
+        pipelineJobs[itemId]?.cancel()
+        pipelineJobs.remove(itemId)
+        ClosetRepository.rejectIngestionItem(itemId)
+        if (normalizationReviewId == itemId) normalizationReviewId = null
+        if (sweepItemId == itemId) sweepItemId = null
+    }
+
+    fun startPipeline(itemId: String, block: suspend () -> Unit) {
+        pipelineJobs[itemId]?.cancel()
+        pipelineJobs[itemId] = scope.launch {
+            try {
+                block()
+            } catch (_: CancellationException) {
+                // User cancelled — item already removed from queue
+            } finally {
+                pipelineJobs.remove(itemId)
             }
+        }
     }
 
     Column(
@@ -218,10 +234,7 @@ fun IngestionScreen(
 
         val galleryLauncher = rememberImagePickerLauncher { localPaths ->
             if (localPaths.isNotEmpty()) {
-                if (isManualUploadPick) {
-                    isManualUploadPick = false
-                    cropDialogPath = localPaths.first()
-                } else if (localPaths.size == 1) {
+                if (localPaths.size == 1) {
                     val path = localPaths.first()
                     interactivePhotoPath = path
                     isDetectingGarments = true
@@ -236,7 +249,7 @@ fun IngestionScreen(
                         localPaths.forEach { path ->
                             val item = ClosetRepository.ingestionQueue.value.find { it.originalImageUrl == path }
                             if (item != null) {
-                                launch { simulateGarmentPipeline(item) }
+                                startPipeline(item.id) { simulateGarmentPipeline(item) }
                             }
                         }
                     }
@@ -249,17 +262,12 @@ fun IngestionScreen(
             when (activeTab) {
                 0 -> BulkCameraOnramp(
                     queue = queue,
-                    onSelectPhotos = {
-                        galleryLauncher()
-                    },
-                    onManualUpload = {
-                        isManualUploadPick = true
-                        galleryLauncher()
-                    },
+                    onSelectPhotos = { galleryLauncher() },
                     onOpenSweep = { sweepItemId = it },
                     onOpenNormalizationReview = { normalizationReviewId = it },
+                    onCancel = { cancelProcessing(it) },
                     onRetry = { item ->
-                        scope.launch { retryIngestionItem(item) }
+                        startPipeline(item.id) { retryIngestionItem(item) }
                     }
                 )
                 1 -> ReceiptForwardOnramp(
@@ -288,215 +296,219 @@ fun IngestionScreen(
 
         // Multi-Garment Interactive Selection Dialog
         if (interactivePhotoPath != null) {
-            AlertDialog(
-                onDismissRequest = {
-                    interactivePhotoPath = null
-                    detectedBoxes = null
-                    isDetectingGarments = false
-                },
-                title = {
-                    Text(
-                        text = "Select Garments to Digitize",
-                        fontFamily = PlayfairFont,
-                        fontWeight = FontWeight.Bold,
-                        color = AccentGold,
-                        fontSize = 18.sp
-                    )
-                },
-                text = {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        if (isDetectingGarments) {
-                            CircularProgressIndicator(color = AccentGold)
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "Analyzing photo for garments...",
-                                fontFamily = OutfitFont,
-                                color = TextMuted,
-                                fontSize = 14.sp
-                            )
-                        } else {
-                            val boxes = detectedBoxes
-                            if (boxes == null || boxes.isEmpty()) {
+            Dialog(
+                onDismissRequest = { /* blocked — use Cancel button */ },
+                properties = DialogProperties(
+                    dismissOnClickOutside = false,
+                    dismissOnBackPress = true,
+                    usePlatformDefaultWidth = false
+                )
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth(0.92f)
+                        .border(1.dp, GlassBorder, RoundedCornerShape(16.dp)),
+                    shape = RoundedCornerShape(16.dp),
+                    color = ObsidianBg
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text(
+                            text = "Select Garments to Digitize",
+                            fontFamily = PlayfairFont,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentGold,
+                            fontSize = 18.sp,
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            if (isDetectingGarments) {
+                                CircularProgressIndicator(color = AccentGold)
+                                Spacer(modifier = Modifier.height(12.dp))
                                 Text(
-                                    text = "No garments detected in the image.",
+                                    text = "Analyzing photo for garments...",
                                     fontFamily = OutfitFont,
                                     color = TextMuted,
                                     fontSize = 14.sp
                                 )
                             } else {
-                                Text(
-                                    text = "Choose which detected items to digitize:",
-                                    fontFamily = OutfitFont,
-                                    color = TextLight,
-                                    fontSize = 13.sp,
-                                    modifier = Modifier.padding(bottom = 12.dp)
-                                )
-                                
-                                LazyColumn(
-                                    modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    items(boxes.size) { idx ->
-                                        val box = boxes[idx]
-                                        var isChecked by remember { mutableStateOf(box.isSelected) }
-                                        
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(Color(0xFF222228))
-                                                .clickable {
-                                                    isChecked = !isChecked
-                                                    detectedBoxes = boxes.mapIndexed { i, b ->
-                                                        if (i == idx) b.copy(isSelected = isChecked) else b
-                                                    }
-                                                }
-                                                .padding(8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Box(
+                                val boxes = detectedBoxes
+                                if (boxes == null || boxes.isEmpty()) {
+                                    Text(
+                                        text = "No garments detected in the image.",
+                                        fontFamily = OutfitFont,
+                                        color = TextMuted,
+                                        fontSize = 14.sp
+                                    )
+                                } else {
+                                    Text(
+                                        text = "Choose which detected items to digitize:",
+                                        fontFamily = OutfitFont,
+                                        color = TextLight,
+                                        fontSize = 13.sp,
+                                        modifier = Modifier.padding(bottom = 12.dp)
+                                    )
+
+                                    LazyColumn(
+                                        modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        items(boxes.size) { idx ->
+                                            val box = boxes[idx]
+                                            var isChecked by remember { mutableStateOf(box.isSelected) }
+
+                                            Row(
                                                 modifier = Modifier
-                                                    .size(44.dp)
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .background(Color.Black),
-                                                contentAlignment = Alignment.Center
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color(0xFF222228))
+                                                    .clickable {
+                                                        isChecked = !isChecked
+                                                        detectedBoxes = boxes.mapIndexed { i, b ->
+                                                            if (i == idx) b.copy(isSelected = isChecked) else b
+                                                        }
+                                                    }
+                                                    .padding(8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                val imageBitmap = remember(box.cropBase64) {
-                                                    if (box.cropBase64.isNotEmpty()) {
-                                                        decodeBase64ToBitmap(box.cropBase64)
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(44.dp)
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .background(Color.Black),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    val imageBitmap = remember(box.cropBase64) {
+                                                        if (box.cropBase64.isNotEmpty()) {
+                                                            decodeBase64ToBitmap(box.cropBase64)
+                                                        } else {
+                                                            null
+                                                        }
+                                                    }
+                                                    if (imageBitmap != null) {
+                                                        Image(
+                                                            bitmap = imageBitmap,
+                                                            contentDescription = null,
+                                                            modifier = Modifier.fillMaxSize(),
+                                                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                                        )
                                                     } else {
-                                                        null
+                                                        Icon(
+                                                            imageVector = Icons.Default.Checkroom,
+                                                            contentDescription = null,
+                                                            tint = if (isChecked) AccentGold else TextMuted
+                                                        )
                                                     }
                                                 }
-                                                if (imageBitmap != null) {
-                                                    Image(
-                                                        bitmap = imageBitmap,
-                                                        contentDescription = null,
-                                                        modifier = Modifier.fillMaxSize(),
-                                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+
+                                                Spacer(modifier = Modifier.width(12.dp))
+
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = box.label.uppercase(),
+                                                        fontFamily = OutfitFont,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 13.sp,
+                                                        color = TextLight
                                                     )
+                                                    Text(
+                                                        text = "Confidence: ${(box.score * 100).toInt()}%",
+                                                        fontFamily = OutfitFont,
+                                                        fontSize = 11.sp,
+                                                        color = TextMuted
+                                                    )
+                                                }
+
+                                                Checkbox(
+                                                    checked = isChecked,
+                                                    onCheckedChange = { checked ->
+                                                        isChecked = checked
+                                                        detectedBoxes = boxes.mapIndexed { i, b ->
+                                                            if (i == idx) b.copy(isSelected = checked) else b
+                                                        }
+                                                    },
+                                                    colors = CheckboxDefaults.colors(
+                                                        checkedColor = AccentGold,
+                                                        uncheckedColor = GlassBorder,
+                                                        checkmarkColor = ObsidianBg
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    interactivePhotoPath = null
+                                    detectedBoxes = null
+                                    isDetectingGarments = false
+                                }
+                            ) {
+                                Text("Cancel", color = TextMuted, fontFamily = OutfitFont)
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = {
+                                    val path = interactivePhotoPath ?: return@Button
+                                    val boxes = detectedBoxes ?: return@Button
+                                    val selectedBoxes = boxes.filter { it.isSelected }
+
+                                    if (selectedBoxes.isNotEmpty()) {
+                                        interactivePhotoPath = null
+                                        detectedBoxes = null
+
+                                        ClosetRepository.queueIngestionItems(listOf(path))
+                                        val item = ClosetRepository.ingestionQueue.value.find { it.originalImageUrl == path }
+                                        if (item != null) {
+                                            selectedBoxes.forEachIndexed { index, box ->
+                                                val id = if (index == 0) item.id else item.id + "_split_" + index + "_" + getEpochTimeMillis()
+
+                                                if (index > 0) {
+                                                    val splitItem = IngestionItem(
+                                                        id = id,
+                                                        originalImageUrl = path,
+                                                        status = IngestionStatus.PRE_FLIGHT,
+                                                        progress = 0.0f,
+                                                        stepLabel = "Waiting for normalization...",
+                                                        label = box.label,
+                                                        cropBase64 = box.cropBase64,
+                                                        sourceImageId = box.sourceImageId
+                                                    )
+                                                    ClosetRepository.addQueuedIngestionItems(listOf(splitItem))
                                                 } else {
-                                                    Icon(
-                                                        imageVector = when {
-                                                            box.label.contains("shirt", ignoreCase = true) || box.label.contains("top", ignoreCase = true) -> Icons.Default.Checkroom
-                                                            box.label.contains("pant", ignoreCase = true) || box.label.contains("jean", ignoreCase = true) || box.label.contains("bottom", ignoreCase = true) -> Icons.Default.Accessibility
-                                                            else -> Icons.Default.Checkroom
-                                                        },
-                                                        contentDescription = null,
-                                                        tint = if (isChecked) AccentGold else TextMuted
-                                                    )
+                                                    ClosetRepository.updateIngestionItemCrop(item.id, box.label, box.cropBase64, box.sourceImageId)
+                                                }
+
+                                                startPipeline(id) {
+                                                    runNormalizePipeline(id, box.cropBase64, box.label)
                                                 }
                                             }
-                                            
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = box.label.uppercase(),
-                                                    fontFamily = OutfitFont,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 13.sp,
-                                                    color = TextLight
-                                                )
-                                                Text(
-                                                    text = "Confidence: ${(box.score * 100).toInt()}%",
-                                                    fontFamily = OutfitFont,
-                                                    fontSize = 11.sp,
-                                                    color = TextMuted
-                                                )
-                                            }
-                                            
-                                            Checkbox(
-                                                checked = isChecked,
-                                                onCheckedChange = { checked ->
-                                                    isChecked = checked
-                                                    detectedBoxes = boxes.mapIndexed { i, b ->
-                                                        if (i == idx) b.copy(isSelected = checked) else b
-                                                    }
-                                                },
-                                                colors = CheckboxDefaults.colors(
-                                                    checkedColor = AccentGold,
-                                                    uncheckedColor = GlassBorder,
-                                                    checkmarkColor = ObsidianBg
-                                                )
-                                            )
                                         }
+                                    } else {
+                                        showToast("Please select at least one garment.")
                                     }
-                                }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentGold),
+                                enabled = !isDetectingGarments && !(detectedBoxes?.filter { it.isSelected }).isNullOrEmpty()
+                            ) {
+                                Text("Start Digitizing", color = ObsidianBg, fontFamily = OutfitFont, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            val path = interactivePhotoPath ?: return@Button
-                            val boxes = detectedBoxes ?: return@Button
-                            val selectedBoxes = boxes.filter { it.isSelected }
-                            
-                            if (selectedBoxes.isNotEmpty()) {
-                                interactivePhotoPath = null
-                                detectedBoxes = null
-                                
-                                scope.launch {
-                                    // Queue a placeholder ingestion item representing the file
-                                    ClosetRepository.queueIngestionItems(listOf(path))
-                                    val item = ClosetRepository.ingestionQueue.value.find { it.originalImageUrl == path }
-                                    if (item != null) {
-                                        // Loop through each selected box in parallel, and run normalize + finalize
-                                        selectedBoxes.forEachIndexed { index, box ->
-                                            val id = if (index == 0) item.id else item.id + "_split_" + index + "_" + getEpochTimeMillis()
-                                            
-                                            // Create a new ingestion item in the queue if it's a split garment
-                                            if (index > 0) {
-                                                val splitItem = com.closetos.app.data.model.IngestionItem(
-                                                    id = id,
-                                                    originalImageUrl = path,
-                                                    status = IngestionStatus.PRE_FLIGHT,
-                                                    progress = 0.0f,
-                                                    stepLabel = "Waiting for normalization...",
-                                                    label = box.label,
-                                                    cropBase64 = box.cropBase64
-                                                )
-                                                ClosetRepository.addQueuedIngestionItems(listOf(splitItem))
-                                            } else {
-                                                ClosetRepository.updateIngestionItemCrop(item.id, box.label, box.cropBase64, box.sourceImageId)
-                                            }
-                                            
-                                            launch {
-                                                runNormalizePipeline(id, box.cropBase64, box.label)
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                showToast("Please select at least one garment.")
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentGold),
-                        enabled = !isDetectingGarments && !(detectedBoxes?.filter { it.isSelected }).isNullOrEmpty()
-                    ) {
-                        Text("Submit to Digitize", color = ObsidianBg, fontFamily = OutfitFont, fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = {
-                            interactivePhotoPath = null
-                            detectedBoxes = null
-                            isDetectingGarments = false
-                        }
-                    ) {
-                        Text("Cancel", color = TextMuted, fontFamily = OutfitFont)
-                    }
-                },
-                containerColor = ObsidianBg,
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
-            )
+                }
+            }
         }
 
         sweepItem?.let { item ->
@@ -515,37 +527,16 @@ fun IngestionScreen(
                     onDismiss = { normalizationReviewId = null },
                     onAccept = { useNormalized ->
                         normalizationReviewId = null
-                        scope.launch { runFinalizePipeline(item, useNormalized) }
+                        startPipeline(item.id) { runFinalizePipeline(item, useNormalized) }
                     }
                 )
             }
         }
-
-        cropDialogPath?.let { path ->
-            ImageCropDialog(
-                imagePath = path,
-                title = "Crop Garment",
-                onDismiss = { cropDialogPath = null },
-                onConfirm = { left, top, width, height ->
-                    val imagePath = cropDialogPath
-                    cropDialogPath = null
-                    scope.launch {
-                        val cropBase64 = cropImageToBase64(imagePath ?: return@launch, left, top, width, height)
-                        if (cropBase64.isNullOrEmpty()) {
-                            showToast("Failed to crop image.")
-                            return@launch
-                        }
-                        ClosetRepository.queueIngestionItems(listOf(imagePath))
-                        val item = ClosetRepository.ingestionQueue.value.find { it.originalImageUrl == imagePath }
-                        if (item != null) {
-                            ClosetRepository.updateIngestionItemCrop(item.id, "Manual Upload", cropBase64)
-                            runNormalizePipeline(item.id, cropBase64, "Manual Upload")
-                        }
-                    }
-                }
-            )
-        }
     }
+}
+
+private suspend fun checkPipelineActive() {
+    if (!currentCoroutineContext().isActive) throw CancellationException()
 }
 
 private suspend fun runNormalizePipeline(
@@ -553,15 +544,17 @@ private suspend fun runNormalizePipeline(
     cropBase64: String,
     label: String
 ) {
-    ClosetRepository.updateIngestionItemProgress(itemId, IngestionStatus.NORMALIZATION, 0.5f, "Normalizing garment with AI...")
+    checkPipelineActive()
+    ClosetRepository.updateIngestionItemProgress(itemId, IngestionStatus.NORMALIZATION, 0.5f, "Normalizing with AI...")
     val result = normalizeGarmentCrop(cropBase64, label)
+    checkPipelineActive()
     if (result != null) {
         ClosetRepository.updateIngestionItemNormalized(itemId, result.imageBase64)
         ClosetRepository.updateIngestionItemProgress(
             itemId,
             IngestionStatus.NORMALIZATION_REVIEW,
             0.85f,
-            "Review normalized image before continuing"
+            "Tap to review normalization"
         )
     } else {
         ClosetRepository.updateIngestionItemNormalized(itemId, cropBase64)
@@ -569,7 +562,7 @@ private suspend fun runNormalizePipeline(
             itemId,
             IngestionStatus.NORMALIZATION_REVIEW,
             0.85f,
-            "Normalization unavailable — review original crop"
+            "Tap to review normalization (AI unavailable)"
         )
     }
 }
@@ -583,21 +576,23 @@ private suspend fun runFinalizePipeline(item: IngestionItem, useNormalized: Bool
         cropBase64
     }
 
+    checkPipelineActive()
     ClosetRepository.updateIngestionItemProgress(
         item.id,
         IngestionStatus.FLORENCE_2,
         0.92f,
-        if (useNormalized) "Extracting attributes from normalized image..." else "Using original crop — extracting attributes..."
+        if (useNormalized) "Extracting metadata from normalized image..." else "Extracting metadata from original crop..."
     )
     val garment = finalizeGarment(imageBase64, cropBase64, label, item.sourceImageId)
+    checkPipelineActive()
     if (garment != null) {
-        ClosetRepository.updateIngestionItemProgress(item.id, IngestionStatus.READY, 1.0f, "Ready for review sweep", garment)
+        ClosetRepository.updateIngestionItemProgress(item.id, IngestionStatus.READY, 1.0f, "Tap to confirm metadata", garment)
     } else {
         ClosetRepository.updateIngestionItemProgress(
             item.id,
             IngestionStatus.FAILED,
             1.0f,
-            "Failed to finalize garment. Tap Retry to try again."
+            "Failed to extract metadata. Tap Retry."
         )
     }
 }
@@ -685,9 +680,9 @@ private suspend fun simulateGarmentPipeline(item: IngestionItem) {
 fun BulkCameraOnramp(
     queue: List<IngestionItem>,
     onSelectPhotos: () -> Unit,
-    onManualUpload: () -> Unit,
     onOpenSweep: (String) -> Unit,
     onOpenNormalizationReview: (String) -> Unit,
+    onCancel: (String) -> Unit,
     onRetry: (IngestionItem) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -706,18 +701,10 @@ fun BulkCameraOnramp(
             )
             Spacer(modifier = Modifier.height(16.dp))
             ElegantButton(
-                text = "Select from Camera Roll (Multi-select)",
+                text = "Select from Camera Roll",
                 onClick = onSelectPhotos,
                 modifier = Modifier.fillMaxWidth(),
                 icon = Icons.Default.PhotoLibrary
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            ElegantButton(
-                text = "Manual Upload & Crop",
-                onClick = onManualUpload,
-                modifier = Modifier.fillMaxWidth(),
-                isSecondary = true,
-                icon = Icons.Default.Upload
             )
         }
 
@@ -739,9 +726,9 @@ fun BulkCameraOnramp(
             if (readyCount > 0 || reviewCount > 0) {
                 Text(
                     text = buildString {
-                        if (reviewCount > 0) append("$reviewCount Awaiting Review")
-                        if (reviewCount > 0 && readyCount > 0) append(" · ")
-                        if (readyCount > 0) append("$readyCount Ready for Sweep")
+                        if (reviewCount > 0) append("$reviewCount · Review normalization")
+                        if (reviewCount > 0 && readyCount > 0) append("  ·  ")
+                        if (readyCount > 0) append("$readyCount · Confirm metadata")
                     },
                     fontFamily = OutfitFont,
                     fontSize = 13.sp,
@@ -769,7 +756,7 @@ fun BulkCameraOnramp(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(queue) { item ->
-                    PipelineItemRow(item, onOpenSweep, onOpenNormalizationReview, onRetry)
+                    PipelineItemRow(item, onOpenSweep, onOpenNormalizationReview, onCancel, onRetry)
                 }
             }
         }
@@ -781,6 +768,7 @@ fun PipelineItemRow(
     item: IngestionItem,
     onOpenSweep: (String) -> Unit,
     onOpenNormalizationReview: (String) -> Unit,
+    onCancel: (String) -> Unit,
     onRetry: (IngestionItem) -> Unit
 ) {
     val progressBrush = Brush.linearGradient(listOf(AccentGold, AccentGoldMuted))
@@ -790,8 +778,11 @@ fun PipelineItemRow(
     val isProcessing = item.status == IngestionStatus.NORMALIZATION ||
         item.status == IngestionStatus.PRE_FLIGHT ||
         item.status == IngestionStatus.GROUNDING_DINO ||
+        item.status == IngestionStatus.QUALITY_VALIDATION ||
+        item.status == IngestionStatus.CROP_GARMENT ||
         item.status == IngestionStatus.FLORENCE_2 ||
-        item.status == IngestionStatus.FASHION_CLIP
+        item.status == IngestionStatus.FASHION_CLIP ||
+        item.status == IngestionStatus.SAM2
 
     Box(
         modifier = Modifier
@@ -930,7 +921,7 @@ fun PipelineItemRow(
                                 modifier = Modifier.height(28.dp)
                             ) {
                                 Text(
-                                    text = "Confirm",
+                                    text = "Confirm Metadata",
                                     fontFamily = OutfitFont,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
@@ -946,7 +937,7 @@ fun PipelineItemRow(
                                 modifier = Modifier.height(28.dp)
                             ) {
                                 Text(
-                                    text = "Review",
+                                    text = "Review Normalization",
                                     fontFamily = OutfitFont,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
@@ -967,6 +958,20 @@ fun PipelineItemRow(
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = ObsidianBg
+                                )
+                            }
+                        } else if (isProcessing) {
+                            TextButton(
+                                onClick = { onCancel(item.id) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Text(
+                                    text = "Cancel",
+                                    fontFamily = OutfitFont,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Red.copy(alpha = 0.85f)
                                 )
                             }
                         } else {
@@ -1020,21 +1025,17 @@ fun PipelineItemRow(
                     }
                 }
 
-                if (item.status == IngestionStatus.FAILED || item.status == IngestionStatus.READY) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    IconButton(
-                        onClick = {
-                            ClosetRepository.rejectIngestionItem(item.id)
-                        },
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Remove item",
-                            tint = TextMuted,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
+                Spacer(modifier = Modifier.width(8.dp))
+                IconButton(
+                    onClick = { onCancel(item.id) },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Remove item",
+                        tint = TextMuted,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
         }

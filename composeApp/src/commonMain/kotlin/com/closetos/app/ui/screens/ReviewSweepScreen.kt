@@ -152,7 +152,7 @@ fun ReviewSweepItemContent(
         originalCropBase64 = item.cropBase64,
         allowImageEdit = true,
         secondaryButtonText = "Discard Crop",
-        primaryButtonText = "Confirm Item",
+        primaryButtonText = "Confirm Metadata",
         onSecondary = {
             showToast("Garment Rejected. Index cleaned.")
             ClosetRepository.rejectIngestionItem(item.id)

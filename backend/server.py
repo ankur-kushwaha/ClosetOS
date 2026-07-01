@@ -274,18 +274,20 @@ def gpt_normalize_crop(payload: CropPayload):
         # Decode base64 crop image
         crop_bytes = base64.b64decode(payload.crop_base64)
         crop_img = Image.open(io.BytesIO(crop_bytes)).convert("RGBA")
-        
+        crop_label = payload.label
         
         # 3. Build custom prompt incorporating the structured caption
         custom_prompt = (
             "Create a professional e-commerce flat-lay product photograph of the garment itself, with NO human model, head, face, hands, arms, legs, skin, or mannequin. "
-            # f"The garment to isolate is: {caption}. "
+            f"The garment to isolate is: {payload.label}. "
             "Remove any human bodies and isolate ONLY the clothing item. Lay the clothing completely flat and straightened. "
             "Strictly preserve the exact neckline and collar shape (e.g., V-neck, round neck, polo collar, stand collar), "
             "fabric texture, patterns, colors, stitching, buttons, and proportions. Do not change the neckline type "
             "or modify the garment structure. Place the garment against a clean, solid studio white background "
             "with bright, neutral studio lighting. Do NOT generate any humans, models, body parts, or backgrounds other than pure white."
         )
+
+        print(f"Payload label: {payload.label}")
      
         # Run normalization pipeline with the customized prompt
         normalized, provider = normalize_garment(crop_img, payload.label, custom_prompt=custom_prompt)
