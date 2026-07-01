@@ -18,7 +18,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -39,8 +38,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun IngestionScreen(
-    sharedUrl: String? = null,
-    onNavigateToReview: () -> Unit
+    sharedUrl: String? = null
 ) {
     var activeTab by remember { mutableStateOf(0) } // 0: Bulk, 1: Receipt, 2: Retailer
     val queue by ClosetRepository.ingestionQueue.collectAsState()
@@ -60,6 +58,10 @@ fun IngestionScreen(
     var interactivePhotoPath by remember { mutableStateOf<String?>(null) }
     var detectedBoxes by remember { mutableStateOf<List<com.closetos.app.data.model.DetectedBox>?>(null) }
     var isDetectingGarments by remember { mutableStateOf(false) }
+    var sweepItemId by remember { mutableStateOf<String?>(null) }
+    val sweepItem = remember(sweepItemId, queue) {
+        sweepItemId?.let { id -> queue.find { it.id == id } }
+    }
 
     Column(
         modifier = Modifier
@@ -231,7 +233,10 @@ fun IngestionScreen(
                     onSelectPhotos = {
                         galleryLauncher()
                     },
-                    onNavigateToReview = onNavigateToReview
+                    onOpenSweep = { sweepItemId = it },
+                    onRetry = { item ->
+                        scope.launch { retryIngestionItem(item) }
+                    }
                 )
                 1 -> ReceiptForwardOnramp(
                     email = "ankur.wardrobe@closet.os",
@@ -438,13 +443,7 @@ fun IngestionScreen(
                                             }
                                             
                                             launch {
-                                                ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.NORMALIZATION, 0.4f, "Isolating & Normalizing garment...")
-                                                val garment = normalizeAndFinalizeGarment(box.cropBase64, box.label, box.sourceImageId)
-                                                if (garment != null) {
-                                                    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.READY, 1.0f, "Ingestion Pipeline Completed!", garment)
-                                                } else {
-                                                    ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.FAILED, 1.0f, "Failed to normalize/finalize garment.")
-                                                }
+                                                runNormalizePipeline(id, box.cropBase64, box.label, box.sourceImageId)
                                             }
                                         }
                                     }
@@ -475,6 +474,45 @@ fun IngestionScreen(
                 modifier = Modifier.border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
             )
         }
+
+        sweepItem?.let { item ->
+            if (item.status == IngestionStatus.READY && item.detectedGarment != null) {
+                ReviewSweepBottomSheet(
+                    item = item,
+                    onDismiss = { sweepItemId = null }
+                )
+            }
+        }
+    }
+}
+
+private suspend fun runNormalizePipeline(
+    itemId: String,
+    cropBase64: String,
+    label: String,
+    sourceImageId: String? = null
+) {
+    ClosetRepository.updateIngestionItemProgress(itemId, IngestionStatus.NORMALIZATION, 0.4f, "Isolating & Normalizing garment...")
+    val garment = normalizeAndFinalizeGarment(cropBase64, label, sourceImageId)
+    if (garment != null) {
+        ClosetRepository.updateIngestionItemProgress(itemId, IngestionStatus.READY, 1.0f, "Ingestion Pipeline Completed!", garment)
+    } else {
+        ClosetRepository.updateIngestionItemProgress(
+            itemId,
+            IngestionStatus.FAILED,
+            1.0f,
+            "Failed to normalize/finalize garment. Tap Retry to try again."
+        )
+    }
+}
+
+private suspend fun retryIngestionItem(item: IngestionItem) {
+    val cropBase64 = item.cropBase64
+    val label = item.label
+    if (!cropBase64.isNullOrEmpty() && !label.isNullOrEmpty()) {
+        runNormalizePipeline(item.id, cropBase64, label)
+    } else {
+        simulateGarmentPipeline(item)
     }
 }
 
@@ -535,7 +573,8 @@ private suspend fun simulateGarmentPipeline(item: IngestionItem) {
 fun BulkCameraOnramp(
     queue: List<IngestionItem>,
     onSelectPhotos: () -> Unit,
-    onNavigateToReview: () -> Unit
+    onOpenSweep: (String) -> Unit,
+    onRetry: (IngestionItem) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         GlassmorphicCard(
@@ -579,8 +618,7 @@ fun BulkCameraOnramp(
                     text = "$readyCount Ready for Sweep",
                     fontFamily = OutfitFont,
                     fontSize = 13.sp,
-                    color = AccentGold,
-                    modifier = Modifier.clickable { onNavigateToReview() }
+                    color = AccentGold
                 )
             }
         }
@@ -604,7 +642,7 @@ fun BulkCameraOnramp(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(queue) { item ->
-                    PipelineItemRow(item, onNavigateToReview)
+                    PipelineItemRow(item, onOpenSweep, onRetry)
                 }
             }
         }
@@ -612,16 +650,14 @@ fun BulkCameraOnramp(
 }
 
 @Composable
-fun PipelineItemRow(item: IngestionItem, onReviewClick: () -> Unit) {
+fun PipelineItemRow(
+    item: IngestionItem,
+    onOpenSweep: (String) -> Unit,
+    onRetry: (IngestionItem) -> Unit
+) {
     val progressBrush = Brush.linearGradient(listOf(AccentGold, AccentGoldMuted))
-
     val garment = item.detectedGarment
-    var editCategory by remember(item.id, garment) { mutableStateOf(garment?.category ?: "") }
-    var editSubcategory by remember(item.id, garment) { mutableStateOf(garment?.subcategory ?: "") }
-    var editBrand by remember(item.id, garment) { mutableStateOf(garment?.brand ?: "") }
-    var editPrice by remember(item.id, garment) { mutableStateOf(garment?.price?.toString() ?: "") }
-    var editMaterial by remember(item.id, garment) { mutableStateOf(garment?.material ?: "") }
-    var editFit by remember(item.id, garment) { mutableStateOf(garment?.fit ?: "") }
+    val isReadyForSweep = item.status == IngestionStatus.READY && garment != null
 
     Box(
         modifier = Modifier
@@ -637,6 +673,13 @@ fun PipelineItemRow(item: IngestionItem, onReviewClick: () -> Unit) {
                 },
                 RoundedCornerShape(12.dp)
             )
+            .then(
+                if (isReadyForSweep) {
+                    Modifier.clickable { onOpenSweep(item.id) }
+                } else {
+                    Modifier
+                }
+            )
             .padding(12.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -644,103 +687,71 @@ fun PipelineItemRow(item: IngestionItem, onReviewClick: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                if (item.status == IngestionStatus.READY && garment != null) {
-                    var sliderValue by remember { mutableStateOf(1f) }
-                    
-                    Column(
-                        modifier = Modifier
-                            .size(width = 80.dp, height = 96.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF2E2E35))
-                            .border(0.5.dp, GlassBorder, RoundedCornerShape(8.dp)),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(
-                            modifier = Modifier.weight(1f).fillMaxWidth(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            val originalBitmap = rememberImageBitmap(garment.imageUrl)
-                            val normalizedBitmap = rememberImageBitmap(garment.straightenedImageUrl ?: garment.imageUrl)
-                            
-                            if (originalBitmap != null) {
-                                Image(
-                                    bitmap = originalBitmap,
-                                    contentDescription = "Original Crop",
-                                    modifier = Modifier.fillMaxSize().alpha(1f - sliderValue),
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                )
-                            }
-                            if (normalizedBitmap != null) {
-                                Image(
-                                    bitmap = normalizedBitmap,
-                                    contentDescription = "Normalized Flatlay",
-                                    modifier = Modifier.fillMaxSize().alpha(sliderValue),
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                )
-                            }
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF2E2E35))
+                        .border(0.5.dp, GlassBorder, RoundedCornerShape(8.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val previewPath = garment?.straightenedImageUrl ?: garment?.imageUrl
+                    val cropBitmap = remember(item.cropBase64) {
+                        if (!item.cropBase64.isNullOrEmpty()) {
+                            decodeBase64ToBitmap(item.cropBase64)
+                        } else {
+                            null
                         }
-                        
-                        Slider(
-                            value = sliderValue,
-                            onValueChange = { sliderValue = it },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(20.dp)
-                                .padding(horizontal = 4.dp),
-                            colors = SliderDefaults.colors(
-                                thumbColor = AccentGold,
-                                activeTrackColor = AccentGold.copy(alpha = 0.5f),
-                                inactiveTrackColor = Color(0xFF222226)
-                            )
-                        )
                     }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF2E2E35))
-                            .border(0.5.dp, GlassBorder, RoundedCornerShape(8.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        val cropBitmap = remember(item.cropBase64) {
-                            if (!item.cropBase64.isNullOrEmpty()) {
-                                decodeBase64ToBitmap(item.cropBase64)
-                            } else {
-                                null
-                            }
-                        }
-                        if (cropBitmap != null) {
+                    if (cropBitmap != null) {
+                        Image(
+                            bitmap = cropBitmap,
+                            contentDescription = "Crop Preview",
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                        )
+                    } else if (previewPath != null) {
+                        val bitmap = rememberImageBitmap(previewPath)
+                        if (bitmap != null) {
                             Image(
-                                bitmap = cropBitmap,
-                                contentDescription = "Crop Preview",
+                                bitmap = bitmap,
+                                contentDescription = "Thumbnail Preview",
                                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)),
                                 contentScale = androidx.compose.ui.layout.ContentScale.Crop
                             )
                         } else {
-                            val previewPath = item.originalImageUrl
-                            val bitmap = rememberImageBitmap(previewPath)
-                            if (bitmap != null) {
-                                Image(
-                                    bitmap = bitmap,
-                                    contentDescription = "Thumbnail Preview",
-                                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)),
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = when {
-                                        item.label?.contains("pant", ignoreCase = true) == true || item.label?.contains("jean", ignoreCase = true) == true || item.label?.contains("bottom", ignoreCase = true) == true || item.originalImageUrl.contains("trousers") -> Icons.Default.Accessibility
-                                        else -> Icons.Default.Checkroom
-                                    },
-                                    contentDescription = null,
-                                    tint = when (item.status) {
-                                        IngestionStatus.READY -> AccentGold
-                                        IngestionStatus.FAILED -> Color.Red
-                                        else -> TextMuted
-                                    }
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Checkroom,
+                                contentDescription = null,
+                                tint = when (item.status) {
+                                    IngestionStatus.READY -> AccentGold
+                                    IngestionStatus.FAILED -> Color.Red
+                                    else -> TextMuted
+                                }
+                            )
+                        }
+                    } else {
+                        val bitmap = rememberImageBitmap(item.originalImageUrl)
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap,
+                                contentDescription = "Thumbnail Preview",
+                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                            )
+                        } else {
+                            Icon(
+                                imageVector = when {
+                                    item.label?.contains("pant", ignoreCase = true) == true || item.label?.contains("jean", ignoreCase = true) == true || item.label?.contains("bottom", ignoreCase = true) == true || item.originalImageUrl.contains("trousers") -> Icons.Default.Accessibility
+                                    else -> Icons.Default.Checkroom
+                                },
+                                contentDescription = null,
+                                tint = when (item.status) {
+                                    IngestionStatus.READY -> AccentGold
+                                    IngestionStatus.FAILED -> Color.Red
+                                    else -> TextMuted
+                                }
+                            )
                         }
                     }
                 }
@@ -764,22 +775,10 @@ fun PipelineItemRow(item: IngestionItem, onReviewClick: () -> Unit) {
                             fontSize = 14.sp,
                             color = TextLight
                         )
-                        
-                        if (item.status == IngestionStatus.READY && garment != null) {
+
+                        if (isReadyForSweep) {
                             Button(
-                                onClick = {
-                                    val updatedGarment = garment.copy(
-                                        category = editCategory,
-                                        subcategory = editSubcategory,
-                                        brand = editBrand,
-                                        price = editPrice.toDoubleOrNull() ?: garment.price,
-                                        material = editMaterial,
-                                        fit = editFit
-                                    )
-                                    ClosetRepository.editIngestedGarment(item.id, updatedGarment)
-                                    ClosetRepository.approveIngestionItem(item.id)
-                                    showToast("Garment confirmed & swept to wardrobe graph!")
-                                },
+                                onClick = { onOpenSweep(item.id) },
                                 colors = ButtonDefaults.buttonColors(containerColor = AccentGold),
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
@@ -793,19 +792,29 @@ fun PipelineItemRow(item: IngestionItem, onReviewClick: () -> Unit) {
                                     color = ObsidianBg
                                 )
                             }
+                        } else if (item.status == IngestionStatus.FAILED) {
+                            Button(
+                                onClick = { onRetry(item) },
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentGold),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Text(
+                                    text = "Retry",
+                                    fontFamily = OutfitFont,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ObsidianBg
+                                )
+                            }
                         } else {
                             Text(
-                                text = when (item.status) {
-                                    IngestionStatus.FAILED -> "Failed"
-                                    else -> "${(item.progress * 100).toInt()}%"
-                                },
+                                text = "${(item.progress * 100).toInt()}%",
                                 fontFamily = OutfitFont,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = when (item.status) {
-                                    IngestionStatus.FAILED -> Color.Red
-                                    else -> TextMuted
-                                }
+                                color = TextMuted
                             )
                         }
                     }
@@ -864,130 +873,6 @@ fun PipelineItemRow(item: IngestionItem, onReviewClick: () -> Unit) {
                             modifier = Modifier.size(16.dp)
                         )
                     }
-                }
-            }
-
-            if (item.status == IngestionStatus.READY && garment != null) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Divider(color = GlassBorder, thickness = 0.5.dp)
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "GARMENT ENTRY DETAILS",
-                    fontFamily = OutfitFont,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp,
-                    color = AccentGold,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    OutlinedTextField(
-                        value = editBrand,
-                        onValueChange = {
-                            editBrand = it
-                            ClosetRepository.editIngestedGarment(item.id, garment.copy(brand = it))
-                        },
-                        label = { Text("Brand", color = TextMuted, fontSize = 9.sp) },
-                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, color = TextLight),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
-                        ),
-                        modifier = Modifier.weight(1f).height(48.dp)
-                    )
-
-                    OutlinedTextField(
-                        value = editPrice,
-                        onValueChange = {
-                            editPrice = it
-                            ClosetRepository.editIngestedGarment(item.id, garment.copy(price = it.toDoubleOrNull() ?: 0.0))
-                        },
-                        label = { Text("Price", color = TextMuted, fontSize = 9.sp) },
-                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, color = TextLight),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
-                        ),
-                        modifier = Modifier.weight(1f).height(48.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    OutlinedTextField(
-                        value = editCategory,
-                        onValueChange = {
-                            editCategory = it
-                            ClosetRepository.editIngestedGarment(item.id, garment.copy(category = it))
-                        },
-                        label = { Text("Category", color = TextMuted, fontSize = 9.sp) },
-                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, color = TextLight),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
-                        ),
-                        modifier = Modifier.weight(1f).height(48.dp)
-                    )
-
-                    OutlinedTextField(
-                        value = editSubcategory,
-                        onValueChange = {
-                            editSubcategory = it
-                            ClosetRepository.editIngestedGarment(item.id, garment.copy(subcategory = it))
-                        },
-                        label = { Text("Subcategory", color = TextMuted, fontSize = 9.sp) },
-                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, color = TextLight),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
-                        ),
-                        modifier = Modifier.weight(1f).height(48.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    OutlinedTextField(
-                        value = editMaterial,
-                        onValueChange = {
-                            editMaterial = it
-                            ClosetRepository.editIngestedGarment(item.id, garment.copy(material = it))
-                        },
-                        label = { Text("Material", color = TextMuted, fontSize = 9.sp) },
-                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, color = TextLight),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
-                        ),
-                        modifier = Modifier.weight(1f).height(48.dp)
-                    )
-
-                    OutlinedTextField(
-                        value = editFit,
-                        onValueChange = {
-                            editFit = it
-                            ClosetRepository.editIngestedGarment(item.id, garment.copy(fit = it))
-                        },
-                        label = { Text("Fit", color = TextMuted, fontSize = 9.sp) },
-                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, color = TextLight),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
-                        ),
-                        modifier = Modifier.weight(1f).height(48.dp)
-                    )
                 }
             }
         }

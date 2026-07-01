@@ -224,15 +224,7 @@ fun App() {
                         when (activeRoute) {
                             Screen.Ootd.route -> OotdScreen()
                             Screen.Ingest.route -> IngestionScreen(
-                                sharedUrl = null,
-                                onNavigateToReview = {
-                                    activeRoute = "review_sweep"
-                                }
-                            )
-                            "review_sweep" -> ReviewSweepScreen(
-                                onBack = {
-                                    activeRoute = Screen.Ingest.route
-                                }
+                                sharedUrl = null
                             )
                             Screen.Wardrobe.route -> WardrobeScreen()
                             Screen.Builder.route -> OutfitBuilderScreen()

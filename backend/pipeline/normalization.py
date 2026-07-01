@@ -55,7 +55,8 @@ def _normalize_gpt_image(masked_rgba: Image.Image, prompt: str) -> Optional[Imag
 
         client = OpenAI(api_key=OPENAI_API_KEY)
         buf = io.BytesIO()
-        composite_white_background(masked_rgba).save(buf, format="PNG")
+        # Keep transparency so DALL-E knows where to perform background editing/inpainting
+        masked_rgba.save(buf, format="PNG")
         buf.seek(0)
         buf.name = "garment.png"
 

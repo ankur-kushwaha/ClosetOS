@@ -135,9 +135,9 @@ def get_yolo_test_page():
 
 # YOLO-World custom endpoint
 @app.post("/yolo-world/detect")
-async def yolo_world_detect(file: UploadFile = File(...), confidence: float = 0.15):
+def yolo_world_detect(file: UploadFile = File(...), confidence: float = 0.15):
     try:
-        contents = await file.read()
+        contents = file.file.read()
         image = Image.open(io.BytesIO(contents)).convert("RGB")
         image = ImageOps.exif_transpose(image)
         
@@ -216,7 +216,7 @@ def clean_garment_caption(raw_caption: str) -> str:
     return '. '.join(cleaned) + '.' if cleaned else raw_caption
 
 @app.post("/yolo-world/florence")
-async def run_florence(payload: FlorencePayload):
+def run_florence(payload: FlorencePayload):
     try:
         import base64
         import io
@@ -243,7 +243,7 @@ async def run_florence(payload: FlorencePayload):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/yolo-world/gpt-normalize")
-async def gpt_normalize_crop(payload: CropPayload):
+def gpt_normalize_crop(payload: CropPayload):
     try:
         # Decode base64 crop image
         crop_bytes = base64.b64decode(payload.crop_base64)
@@ -276,7 +276,7 @@ async def gpt_normalize_crop(payload: CropPayload):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/yolo-world/finalize")
-async def yolo_world_finalize(payload: FinalizePayload):
+def yolo_world_finalize(payload: FinalizePayload):
     try:
         import base64
         import io
@@ -442,9 +442,9 @@ def get_garment_by_id(id: str):
 
 # 10. POST /garments/search - Similarity search
 @app.post("/garments/search")
-async def search_garments(file: UploadFile = File(...), limit: int = 5):
+def search_garments(file: UploadFile = File(...), limit: int = 5):
     try:
-        contents = await file.read()
+        contents = file.file.read()
         image = Image.open(io.BytesIO(contents)).convert("RGB")
         embedding = encode_image(image, device)
         results = db_manager.search_similar_garments(embedding, limit=limit)

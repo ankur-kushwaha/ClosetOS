@@ -644,8 +644,8 @@ actual suspend fun normalizeAndFinalizeGarment(
             normalizeConn.doInput = true
             normalizeConn.useCaches = false
             normalizeConn.requestMethod = "POST"
-            normalizeConn.connectTimeout = 40000
-            normalizeConn.readTimeout = 40000
+            normalizeConn.connectTimeout = 120_000
+            normalizeConn.readTimeout = 120_000
             normalizeConn.setRequestProperty("Content-Type", "application/json")
             
             val normPayload = org.json.JSONObject()
@@ -675,8 +675,8 @@ actual suspend fun normalizeAndFinalizeGarment(
             finalizeConn.doInput = true
             finalizeConn.useCaches = false
             finalizeConn.requestMethod = "POST"
-            finalizeConn.connectTimeout = 30000
-            finalizeConn.readTimeout = 30000
+            finalizeConn.connectTimeout = 90_000
+            finalizeConn.readTimeout = 90_000
             finalizeConn.setRequestProperty("Content-Type", "application/json")
             
             val finalPayload = org.json.JSONObject()
