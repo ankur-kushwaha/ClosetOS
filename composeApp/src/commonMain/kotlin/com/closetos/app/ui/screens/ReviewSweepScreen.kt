@@ -19,20 +19,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.closetos.app.cropImageToBase64
 import com.closetos.app.data.model.Garment
+import com.closetos.app.data.model.GarmentCategories
 import com.closetos.app.data.model.IngestionItem
 import com.closetos.app.data.model.IngestionStatus
-import com.closetos.app.data.model.generateUUID
 import com.closetos.app.data.repository.ClosetRepository
+import com.closetos.app.decodeBase64ToBitmap
 import com.closetos.app.rememberImageBitmap
+import com.closetos.app.rememberImagePickerLauncher
+import com.closetos.app.saveBase64ImageToFile
 import com.closetos.app.showToast
 import com.closetos.app.ui.components.ElegantButton
 import com.closetos.app.ui.components.GlassmorphicCard
+import com.closetos.app.ui.components.ImageCropDialog
 import com.closetos.app.ui.components.TagChip
 import com.closetos.app.ui.theme.*
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
 @Composable
@@ -115,7 +122,7 @@ fun GarmentEditBottomSheet(
 
             GarmentEditFormContent(
                 garment = garment,
-                showSplitMerge = false,
+                allowImageEdit = true,
                 secondaryButtonText = "Delete",
                 primaryButtonText = "Save Changes",
                 onSecondary = {
@@ -142,8 +149,8 @@ fun ReviewSweepItemContent(
 
     GarmentEditFormContent(
         garment = garment,
-        showSplitMerge = true,
-        ingestionItemId = item.id,
+        originalCropBase64 = item.cropBase64,
+        allowImageEdit = true,
         secondaryButtonText = "Discard Crop",
         primaryButtonText = "Confirm Item",
         onSecondary = {
@@ -160,16 +167,65 @@ fun ReviewSweepItemContent(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CategoryDropdown(
+    label: String,
+    value: String,
+    options: List<String>,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = modifier
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label, color = TextMuted) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = TextLight,
+                unfocusedTextColor = TextLight,
+                focusedBorderColor = AccentGold,
+                unfocusedBorderColor = GlassBorder
+            ),
+            modifier = Modifier.menuAnchor().fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(CharcoalSurface)
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option, fontFamily = OutfitFont, color = TextLight) },
+                    onClick = {
+                        onValueChange(option)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
 @Composable
 fun GarmentEditFormContent(
     garment: Garment,
-    showSplitMerge: Boolean,
-    ingestionItemId: String? = null,
+    originalCropBase64: String? = null,
+    allowImageEdit: Boolean = false,
     secondaryButtonText: String,
     primaryButtonText: String,
     onSecondary: () -> Unit,
     onPrimary: (Garment) -> Unit
 ) {
+    val scope = rememberCoroutineScope()
     var editCategory by remember(garment.id) { mutableStateOf(garment.category) }
     var editSubcategory by remember(garment.id) { mutableStateOf(garment.subcategory) }
     var editBrand by remember(garment.id) { mutableStateOf(garment.brand) }
@@ -178,6 +234,33 @@ fun GarmentEditFormContent(
     var editFit by remember(garment.id) { mutableStateOf(garment.fit) }
     var editFormality by remember(garment.id) { mutableStateOf(garment.formalityScore) }
     var showStraightened by remember(garment.id) { mutableStateOf(true) }
+    var editedImagePath by remember(garment.id) { mutableStateOf<String?>(null) }
+    var editedCropBase64 by remember(garment.id) { mutableStateOf<String?>(null) }
+    var cropDialogPath by remember { mutableStateOf<String?>(null) }
+    var pendingPickerForEdit by remember { mutableStateOf(false) }
+
+    val subcategoryOptions = remember(editCategory) {
+        val options = GarmentCategories.subcategoriesFor(editCategory)
+        if (editSubcategory !in options && editSubcategory.isNotEmpty()) {
+            listOf(editSubcategory) + options
+        } else {
+            options
+        }
+    }
+
+    LaunchedEffect(editCategory) {
+        val options = GarmentCategories.subcategoriesFor(editCategory)
+        if (options.isNotEmpty() && editSubcategory !in options) {
+            editSubcategory = options.first()
+        }
+    }
+
+    val imagePicker = rememberImagePickerLauncher { paths ->
+        if (paths.isNotEmpty() && pendingPickerForEdit) {
+            pendingPickerForEdit = false
+            cropDialogPath = paths.first()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -194,20 +277,30 @@ fun GarmentEditFormContent(
                 .border(0.5.dp, GlassBorder, RoundedCornerShape(16.dp)),
             contentAlignment = Alignment.Center
         ) {
-            val displayUrl = if (showStraightened && !garment.straightenedImageUrl.isNullOrEmpty()) {
-                garment.straightenedImageUrl ?: ""
-            } else {
-                garment.imageUrl
+            val rawCropBase64 = editedCropBase64 ?: originalCropBase64
+            val displayPath = when {
+                showStraightened && editedImagePath != null -> editedImagePath
+                !showStraightened && editedImagePath != null -> editedImagePath
+                showStraightened && !garment.straightenedImageUrl.isNullOrEmpty() -> garment.straightenedImageUrl
+                !showStraightened && !garment.imageUrl.isNullOrEmpty() -> garment.imageUrl
+                else -> ""
             }
-            val bitmap = if (displayUrl.isNotEmpty()) rememberImageBitmap(displayUrl) else null
+
+            val rawBitmap = if (!showStraightened && !rawCropBase64.isNullOrEmpty()) {
+                remember(rawCropBase64) { decodeBase64ToBitmap(rawCropBase64) }
+            } else null
+            val pathBitmap = if (displayPath?.isNotEmpty() == true) rememberImageBitmap(displayPath) else null
+            val bitmap = rawBitmap ?: pathBitmap
+
             if (bitmap != null) {
                 Image(
                     bitmap = bitmap,
-                    contentDescription = "Segmented Garment Cutout",
+                    contentDescription = "Garment image",
                     modifier = Modifier
                         .fillMaxHeight(0.9f)
                         .aspectRatio(1f)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(8.dp)),
+                    contentScale = ContentScale.Fit
                 )
             } else {
                 Icon(
@@ -218,7 +311,10 @@ fun GarmentEditFormContent(
                 )
             }
 
-            if (!garment.straightenedImageUrl.isNullOrEmpty()) {
+            val hasToggle = !rawCropBase64.isNullOrEmpty() ||
+                !garment.straightenedImageUrl.isNullOrEmpty() ||
+                garment.imageUrl.isNotEmpty()
+            if (hasToggle) {
                 Row(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
@@ -251,7 +347,7 @@ fun GarmentEditFormContent(
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = "Straightened",
+                            text = "Normalized",
                             color = if (showStraightened) ObsidianBg else TextMuted,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
@@ -259,63 +355,26 @@ fun GarmentEditFormContent(
                     }
                 }
             }
+
+            if (allowImageEdit) {
+                IconButton(
+                    onClick = {
+                        pendingPickerForEdit = true
+                        imagePicker()
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(8.dp)
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(CharcoalSurface.copy(alpha = 0.9f))
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit image", tint = AccentGold, modifier = Modifier.size(18.dp))
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
-
-        if (showSplitMerge && ingestionItemId != null) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ElegantButton(
-                    text = "Split Garment",
-                    onClick = {
-                        showToast("Split item into Top & Bottom! Model Retraining log queued.")
-                        val item1 = garment.copy(
-                            id = "split_g_1_" + generateUUID(),
-                            category = "Top",
-                            subcategory = "Silk Camisole",
-                            price = garment.price / 2.0
-                        )
-                        val item2 = garment.copy(
-                            id = "split_g_2_" + generateUUID(),
-                            category = "Bottom",
-                            subcategory = "Silk Midi Skirt",
-                            price = garment.price / 2.0
-                        )
-                        ClosetRepository.rejectIngestionItem(ingestionItemId)
-                        ClosetRepository.queueIngestionItems(listOf("split_crop_1.jpg", "split_crop_2.jpg"))
-                        val q = ClosetRepository.ingestionQueue.value
-                        q.takeLast(2).forEach { qItem ->
-                            ClosetRepository.updateIngestionItemProgress(
-                                qItem.id,
-                                IngestionStatus.READY,
-                                1.0f,
-                                "Split output derived.",
-                                if (qItem.originalImageUrl.contains("1")) item1 else item2
-                            )
-                        }
-                        onSecondary()
-                    },
-                    isSecondary = true,
-                    icon = Icons.Default.CallSplit,
-                    modifier = Modifier.weight(1f)
-                )
-
-                ElegantButton(
-                    text = "Merge Duplicate",
-                    onClick = {
-                        showToast("Merged with Ralph Lauren Oxford in Closet. Labeled training example recorded.")
-                        ClosetRepository.rejectIngestionItem(ingestionItemId)
-                        onSecondary()
-                    },
-                    isSecondary = true,
-                    icon = Icons.Default.MergeType,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
 
         GlassmorphicCard(modifier = Modifier.fillMaxWidth()) {
             Text(
@@ -353,24 +412,18 @@ fun GarmentEditFormContent(
             Spacer(modifier = Modifier.height(12.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
+                CategoryDropdown(
+                    label = "Category",
                     value = editCategory,
+                    options = GarmentCategories.categories,
                     onValueChange = { editCategory = it },
-                    label = { Text("Category", color = TextMuted) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
-                    ),
                     modifier = Modifier.weight(1f)
                 )
-                OutlinedTextField(
+                CategoryDropdown(
+                    label = "Subcategory",
                     value = editSubcategory,
+                    options = subcategoryOptions,
                     onValueChange = { editSubcategory = it },
-                    label = { Text("Subcategory", color = TextMuted) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextLight, focusedBorderColor = AccentGold, unfocusedBorderColor = GlassBorder
-                    ),
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -451,32 +504,66 @@ fun GarmentEditFormContent(
             ElegantButton(
                 text = primaryButtonText,
                 onClick = {
-                    val finalImageUrl = if (showStraightened && !garment.straightenedImageUrl.isNullOrEmpty()) {
-                        garment.straightenedImageUrl
-                    } else {
-                        garment.imageUrl
+                    scope.launch {
+                        val rawImageUrl = editedImagePath
+                            ?: if (!showStraightened) garment.imageUrl else garment.straightenedImageUrl ?: garment.imageUrl
+                        val straightenedImageUrl = editedImagePath
+                            ?: if (showStraightened) garment.straightenedImageUrl ?: garment.imageUrl else garment.straightenedImageUrl
+
+                        val finalImageUrl = if (showStraightened) {
+                            straightenedImageUrl ?: rawImageUrl
+                        } else {
+                            rawImageUrl
+                        }
+                        val finalStraightened = if (showStraightened) {
+                            straightenedImageUrl ?: finalImageUrl
+                        } else {
+                            garment.straightenedImageUrl
+                        }
+
+                        val updatedGarment = garment.copy(
+                            category = editCategory,
+                            subcategory = editSubcategory,
+                            brand = editBrand,
+                            price = editPrice.toDoubleOrNull() ?: garment.price,
+                            material = editMaterial,
+                            fit = editFit,
+                            formalityScore = editFormality,
+                            imageUrl = finalImageUrl,
+                            straightenedImageUrl = finalStraightened
+                        )
+                        onPrimary(updatedGarment)
                     }
-                    val finalStraightenedImageUrl = if (showStraightened && !garment.straightenedImageUrl.isNullOrEmpty()) {
-                        garment.imageUrl
-                    } else {
-                        garment.straightenedImageUrl
-                    }
-                    val updatedGarment = garment.copy(
-                        category = editCategory,
-                        subcategory = editSubcategory,
-                        brand = editBrand,
-                        price = editPrice.toDoubleOrNull() ?: garment.price,
-                        material = editMaterial,
-                        fit = editFit,
-                        formalityScore = editFormality,
-                        imageUrl = finalImageUrl,
-                        straightenedImageUrl = finalStraightenedImageUrl
-                    )
-                    onPrimary(updatedGarment)
                 },
                 modifier = Modifier.weight(1.5f)
             )
         }
+    }
+
+    cropDialogPath?.let { path ->
+        ImageCropDialog(
+            imagePath = path,
+            title = "Crop Garment Image",
+            onDismiss = { cropDialogPath = null },
+            onConfirm = { left, top, width, height ->
+                val imagePath = cropDialogPath
+                cropDialogPath = null
+                scope.launch {
+                    val cropBase64 = cropImageToBase64(imagePath ?: return@launch, left, top, width, height)
+                    if (cropBase64.isNullOrEmpty()) {
+                        showToast("Failed to crop image.")
+                        return@launch
+                    }
+                    editedCropBase64 = cropBase64
+                    val savedPath = saveBase64ImageToFile(cropBase64, "edited_crop")
+                    if (savedPath != null) {
+                        editedImagePath = savedPath
+                        showStraightened = false
+                        showToast("Image updated.")
+                    }
+                }
+            }
+        )
     }
 }
 
@@ -549,6 +636,8 @@ fun ReviewSweepScreen(onBack: () -> Unit) {
                 val isActive = index == activeIndex
                 val borderCol = if (isActive) AccentGold else GlassBorder
                 val bg = if (isActive) Color(0x1CE5C185) else GlassOverlay
+                val cropThumb = reviewItem.cropBase64?.let { remember(it) { decodeBase64ToBitmap(it) } }
+                val pathThumb = reviewItem.detectedGarment?.straightenedImageUrl?.let { rememberImageBitmap(it) }
 
                 Box(
                     modifier = Modifier
@@ -560,12 +649,13 @@ fun ReviewSweepScreen(onBack: () -> Unit) {
                         .padding(4.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    val thumbBitmap = reviewItem.detectedGarment?.imageUrl?.let { rememberImageBitmap(it) }
+                    val thumbBitmap = cropThumb ?: pathThumb
                     if (thumbBitmap != null) {
                         Image(
                             bitmap = thumbBitmap,
                             contentDescription = null,
-                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp))
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp)),
+                            contentScale = ContentScale.Crop
                         )
                     } else {
                         Icon(

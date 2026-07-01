@@ -2,6 +2,7 @@ package com.closetos.app
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.ImageBitmap
+import com.closetos.app.data.model.Garment
 import com.closetos.app.data.model.TravelCapsulePlan
 import kotlinx.browser.window
 import kotlin.coroutines.resume
@@ -175,13 +176,50 @@ actual suspend fun runGarmentDetection(path: String): List<com.closetos.app.data
     )
 }
 
-actual suspend fun normalizeAndFinalizeGarment(
+actual suspend fun normalizeGarmentCrop(
+    cropBase64: String,
+    label: String
+): com.closetos.app.data.model.NormalizationResult? {
+    kotlinx.coroutines.delay(800)
+    return com.closetos.app.data.model.NormalizationResult(imageBase64 = cropBase64, provider = "mock")
+}
+
+actual suspend fun finalizeGarment(
+    imageBase64: String,
     cropBase64: String,
     label: String,
     sourceImageId: String?
 ): Garment? {
-    return null
+    val template = garmentTemplates.firstOrNull { label.contains(it.category, ignoreCase = true) }
+        ?: garmentTemplates[0]
+    return Garment(
+        category = template.category,
+        subcategory = template.subcategory,
+        colorName = "Sky Blue",
+        labColor = floatArrayOf(80f, -10f, -20f),
+        material = template.material,
+        pattern = template.pattern,
+        fit = template.fit,
+        seasons = template.seasons,
+        formalityScore = template.formalityScore,
+        silhouette = template.silhouette,
+        price = template.price,
+        brand = template.brand + " (Web Mock)",
+        imageUrl = "",
+        straightenedImageUrl = "",
+        embedding = FloatArray(512)
+    )
 }
+
+actual suspend fun cropImageToBase64(
+    imagePath: String,
+    cropLeft: Float,
+    cropTop: Float,
+    cropWidth: Float,
+    cropHeight: Float
+): String? = null
+
+actual suspend fun saveBase64ImageToFile(base64: String, prefix: String): String? = null
 
 actual suspend fun generateTravelCapsule(
     destination: String,

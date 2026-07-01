@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import com.closetos.app.data.model.Garment
 import com.closetos.app.data.model.LaundryStatus
+import com.closetos.app.data.model.NormalizationResult
 import com.closetos.app.data.model.TravelCapsulePlan
 import com.closetos.app.data.model.TravelDayOutfit
 import kotlinx.coroutines.Dispatchers
@@ -621,15 +622,12 @@ actual suspend fun runGarmentDetection(path: String): List<com.closetos.app.data
     }
 }
 
-actual suspend fun normalizeAndFinalizeGarment(
+actual suspend fun normalizeGarmentCrop(
     cropBase64: String,
-    label: String,
-    sourceImageId: String?
-): Garment? {
-    val context = PlatformStorage.applicationContext ?: return null
+    label: String
+): NormalizationResult? {
     return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         var normalizeConn: java.net.HttpURLConnection? = null
-        var finalizeConn: java.net.HttpURLConnection? = null
         try {
             val savedIp = PlatformStorage.loadString("backend_ip")?.trim() ?: "http://10.0.2.2:8000"
             val baseUrl = if (savedIp.startsWith("http://") || savedIp.startsWith("https://")) {
@@ -637,8 +635,7 @@ actual suspend fun normalizeAndFinalizeGarment(
             } else {
                 "http://$savedIp"
             }
-            
-            // --- Step 1: POST /yolo-world/gpt-normalize ---
+
             val normalizeUrl = "${baseUrl.trimEnd('/')}/yolo-world/gpt-normalize"
             val url1 = java.net.URL(normalizeUrl)
             normalizeConn = url1.openConnection() as java.net.HttpURLConnection
@@ -649,27 +646,52 @@ actual suspend fun normalizeAndFinalizeGarment(
             normalizeConn.connectTimeout = 120_000
             normalizeConn.readTimeout = 120_000
             normalizeConn.setRequestProperty("Content-Type", "application/json")
-            
+
             val normPayload = org.json.JSONObject()
             normPayload.put("crop_base64", cropBase64)
             normPayload.put("label", label)
-            
+
             normalizeConn.outputStream.use { out ->
                 out.write(normPayload.toString().toByteArray(charset("UTF-8")))
                 out.flush()
             }
-            
+
             val code1 = normalizeConn.responseCode
             if (code1 != java.net.HttpURLConnection.HTTP_OK) {
                 return@withContext null
             }
-            
+
             val res1 = normalizeConn.inputStream.bufferedReader().use { it.readText() }
             val root1 = org.json.JSONObject(res1)
             val normalizedBase64 = root1.getString("image_base64")
-            normalizeConn.disconnect()
-            
-            // --- Step 2: POST /yolo-world/finalize ---
+            val provider = root1.optString("provider", "gpt-image")
+            NormalizationResult(imageBase64 = normalizedBase64, provider = provider)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        } finally {
+            normalizeConn?.disconnect()
+        }
+    }
+}
+
+actual suspend fun finalizeGarment(
+    imageBase64: String,
+    cropBase64: String,
+    label: String,
+    sourceImageId: String?
+): Garment? {
+    val context = PlatformStorage.applicationContext ?: return null
+    return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        var finalizeConn: java.net.HttpURLConnection? = null
+        try {
+            val savedIp = PlatformStorage.loadString("backend_ip")?.trim() ?: "http://10.0.2.2:8000"
+            val baseUrl = if (savedIp.startsWith("http://") || savedIp.startsWith("https://")) {
+                savedIp
+            } else {
+                "http://$savedIp"
+            }
+
             val finalizeUrl = "${baseUrl.trimEnd('/')}/yolo-world/finalize"
             val url2 = java.net.URL(finalizeUrl)
             finalizeConn = url2.openConnection() as java.net.HttpURLConnection
@@ -680,38 +702,42 @@ actual suspend fun normalizeAndFinalizeGarment(
             finalizeConn.connectTimeout = 90_000
             finalizeConn.readTimeout = 90_000
             finalizeConn.setRequestProperty("Content-Type", "application/json")
-            
+
             val finalPayload = org.json.JSONObject()
-            finalPayload.put("image_base64", normalizedBase64)
+            finalPayload.put("image_base64", imageBase64)
             finalPayload.put("crop_base64", cropBase64)
             finalPayload.put("label", label)
             if (sourceImageId != null) {
                 finalPayload.put("source_image_id", sourceImageId)
             }
-            
+
             finalizeConn.outputStream.use { out ->
                 out.write(finalPayload.toString().toByteArray(charset("UTF-8")))
                 out.flush()
             }
-            
+
             val code2 = finalizeConn.responseCode
             if (code2 != java.net.HttpURLConnection.HTTP_OK) {
                 return@withContext null
             }
-            
+
             val res2 = finalizeConn.inputStream.bufferedReader().use { it.readText() }
             val root2 = org.json.JSONObject(res2)
-            
-            val garmentId = root2.getString("garment_id")
+
             val base64Img = root2.getString("image_base64")
             val straightenedBase64Img = root2.optString("straightened_image_base64", base64Img)
             val attr = root2.getJSONObject("attributes")
 
-            // Write image files to local application cache
             val pngBytes = android.util.Base64.decode(base64Img, android.util.Base64.DEFAULT)
             val croppedFile = File(context.filesDir, "cropped_server_${System.currentTimeMillis()}.png")
             FileOutputStream(croppedFile).use { fos ->
                 fos.write(pngBytes)
+            }
+
+            val cropPngBytes = android.util.Base64.decode(cropBase64, android.util.Base64.DEFAULT)
+            val rawCropFile = File(context.filesDir, "raw_crop_${System.currentTimeMillis()}.png")
+            FileOutputStream(rawCropFile).use { fos ->
+                fos.write(cropPngBytes)
             }
 
             val straightenedPngBytes = android.util.Base64.decode(straightenedBase64Img, android.util.Base64.DEFAULT)
@@ -742,7 +768,7 @@ actual suspend fun normalizeAndFinalizeGarment(
                 silhouette = attr.getString("silhouette"),
                 brand = attr.optString("brand", "Inferred"),
                 price = attr.optDouble("price", 0.0),
-                imageUrl = croppedFile.absolutePath,
+                imageUrl = rawCropFile.absolutePath,
                 straightenedImageUrl = straightenedFile.absolutePath,
                 embedding = embedding
             )
@@ -750,8 +776,51 @@ actual suspend fun normalizeAndFinalizeGarment(
             e.printStackTrace()
             null
         } finally {
-            normalizeConn?.disconnect()
             finalizeConn?.disconnect()
+        }
+    }
+}
+
+actual suspend fun cropImageToBase64(
+    imagePath: String,
+    cropLeft: Float,
+    cropTop: Float,
+    cropWidth: Float,
+    cropHeight: Float
+): String? {
+    return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            val file = File(imagePath)
+            if (!file.exists()) return@withContext null
+            val bitmap = BitmapFactory.decodeFile(imagePath) ?: return@withContext null
+            val left = (cropLeft * bitmap.width).toInt().coerceIn(0, bitmap.width - 1)
+            val top = (cropTop * bitmap.height).toInt().coerceIn(0, bitmap.height - 1)
+            val width = (cropWidth * bitmap.width).toInt().coerceAtLeast(1).coerceAtMost(bitmap.width - left)
+            val height = (cropHeight * bitmap.height).toInt().coerceAtLeast(1).coerceAtMost(bitmap.height - top)
+            val cropped = Bitmap.createBitmap(bitmap, left, top, width, height)
+            val stream = java.io.ByteArrayOutputStream()
+            cropped.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            android.util.Base64.encodeToString(stream.toByteArray(), android.util.Base64.NO_WRAP)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+}
+
+actual suspend fun saveBase64ImageToFile(base64: String, prefix: String): String? {
+    val context = PlatformStorage.applicationContext ?: return null
+    return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            val pngBytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+            val file = File(context.filesDir, "${prefix}_${System.currentTimeMillis()}.png")
+            FileOutputStream(file).use { fos ->
+                fos.write(pngBytes)
+            }
+            file.absolutePath
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
         }
     }
 }

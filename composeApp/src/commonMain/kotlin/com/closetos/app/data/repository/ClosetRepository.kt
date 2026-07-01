@@ -593,10 +593,20 @@ object ClosetRepository {
         }
     }
 
-    fun updateIngestionItemCrop(itemId: String, label: String, cropBase64: String) {
+    fun updateIngestionItemCrop(itemId: String, label: String, cropBase64: String, sourceImageId: String? = null) {
         _ingestionQueue.value = _ingestionQueue.value.map { item ->
             if (item.id == itemId) {
-                item.copy(label = label, cropBase64 = cropBase64)
+                item.copy(label = label, cropBase64 = cropBase64, sourceImageId = sourceImageId ?: item.sourceImageId)
+            } else {
+                item
+            }
+        }
+    }
+
+    fun updateIngestionItemNormalized(itemId: String, normalizedBase64: String) {
+        _ingestionQueue.value = _ingestionQueue.value.map { item ->
+            if (item.id == itemId) {
+                item.copy(normalizedBase64 = normalizedBase64)
             } else {
                 item
             }

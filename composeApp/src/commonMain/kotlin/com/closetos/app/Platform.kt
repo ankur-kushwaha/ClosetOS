@@ -3,6 +3,7 @@ package com.closetos.app
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.ImageBitmap
 import com.closetos.app.data.model.Garment
+import com.closetos.app.data.model.NormalizationResult
 import com.closetos.app.data.model.TravelCapsulePlan
 import com.closetos.app.data.model.TravelDayOutfit
 
@@ -37,11 +38,27 @@ expect fun defaultBackendUrl(): String
 
 expect suspend fun runGarmentDetection(path: String): List<com.closetos.app.data.model.DetectedBox>?
 
-expect suspend fun normalizeAndFinalizeGarment(
+expect suspend fun normalizeGarmentCrop(
+    cropBase64: String,
+    label: String
+): NormalizationResult?
+
+expect suspend fun finalizeGarment(
+    imageBase64: String,
     cropBase64: String,
     label: String,
     sourceImageId: String? = null
 ): Garment?
+
+expect suspend fun cropImageToBase64(
+    imagePath: String,
+    cropLeft: Float,
+    cropTop: Float,
+    cropWidth: Float,
+    cropHeight: Float
+): String?
+
+expect suspend fun saveBase64ImageToFile(base64: String, prefix: String): String?
 
 expect suspend fun generateTravelCapsule(
     destination: String,

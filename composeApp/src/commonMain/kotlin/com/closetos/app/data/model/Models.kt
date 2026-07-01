@@ -113,6 +113,11 @@ data class DetectedBox(
     val sourceImageId: String? = null
 )
 
+data class NormalizationResult(
+    val imageBase64: String,
+    val provider: String = "unknown"
+)
+
 data class IngestionItem(
     val id: String = generateUUID(),
     val originalImageUrl: String,
@@ -121,7 +126,10 @@ data class IngestionItem(
     val stepLabel: String,
     val detectedGarment: Garment? = null,
     val label: String? = null,
-    val cropBase64: String? = null
+    val cropBase64: String? = null,
+    val normalizedBase64: String? = null,
+    val sourceImageId: String? = null,
+    val isManualUpload: Boolean = false
 )
 
 enum class IngestionStatus {
@@ -130,6 +138,7 @@ enum class IngestionStatus {
     SAM2,
     QUALITY_VALIDATION,
     NORMALIZATION,
+    NORMALIZATION_REVIEW,
     CROP_GARMENT,
     FASHION_CLIP,
     FLORENCE_2,

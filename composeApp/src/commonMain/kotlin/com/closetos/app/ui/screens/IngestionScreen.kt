@@ -31,6 +31,7 @@ import com.closetos.app.data.model.*
 import com.closetos.app.data.repository.ClosetRepository
 import com.closetos.app.ui.components.ElegantButton
 import com.closetos.app.ui.components.GlassmorphicCard
+import com.closetos.app.ui.components.ImageCropDialog
 import com.closetos.app.ui.components.SectionHeader
 import com.closetos.app.ui.theme.*
 import kotlinx.coroutines.delay
@@ -59,8 +60,23 @@ fun IngestionScreen(
     var detectedBoxes by remember { mutableStateOf<List<com.closetos.app.data.model.DetectedBox>?>(null) }
     var isDetectingGarments by remember { mutableStateOf(false) }
     var sweepItemId by remember { mutableStateOf<String?>(null) }
+    var normalizationReviewId by remember { mutableStateOf<String?>(null) }
+    var cropDialogPath by remember { mutableStateOf<String?>(null) }
+    var isManualUploadPick by remember { mutableStateOf(false) }
     val sweepItem = remember(sweepItemId, queue) {
         sweepItemId?.let { id -> queue.find { it.id == id } }
+    }
+    val normalizationReviewItem = remember(normalizationReviewId, queue) {
+        normalizationReviewId?.let { id -> queue.find { it.id == id } }
+    }
+    var autoOpenedReviewIds by remember { mutableStateOf(setOf<String>()) }
+
+    LaunchedEffect(queue) {
+        queue.filter { it.status == IngestionStatus.NORMALIZATION_REVIEW && it.id !in autoOpenedReviewIds }
+            .firstOrNull()?.let { item ->
+                normalizationReviewId = item.id
+                autoOpenedReviewIds = autoOpenedReviewIds + item.id
+            }
     }
 
     Column(
@@ -202,7 +218,10 @@ fun IngestionScreen(
 
         val galleryLauncher = rememberImagePickerLauncher { localPaths ->
             if (localPaths.isNotEmpty()) {
-                if (localPaths.size == 1) {
+                if (isManualUploadPick) {
+                    isManualUploadPick = false
+                    cropDialogPath = localPaths.first()
+                } else if (localPaths.size == 1) {
                     val path = localPaths.first()
                     interactivePhotoPath = path
                     isDetectingGarments = true
@@ -233,7 +252,12 @@ fun IngestionScreen(
                     onSelectPhotos = {
                         galleryLauncher()
                     },
+                    onManualUpload = {
+                        isManualUploadPick = true
+                        galleryLauncher()
+                    },
                     onOpenSweep = { sweepItemId = it },
+                    onOpenNormalizationReview = { normalizationReviewId = it },
                     onRetry = { item ->
                         scope.launch { retryIngestionItem(item) }
                     }
@@ -439,11 +463,11 @@ fun IngestionScreen(
                                                 )
                                                 ClosetRepository.addQueuedIngestionItems(listOf(splitItem))
                                             } else {
-                                                ClosetRepository.updateIngestionItemCrop(item.id, box.label, box.cropBase64)
+                                                ClosetRepository.updateIngestionItemCrop(item.id, box.label, box.cropBase64, box.sourceImageId)
                                             }
                                             
                                             launch {
-                                                runNormalizePipeline(id, box.cropBase64, box.label, box.sourceImageId)
+                                                runNormalizePipeline(id, box.cropBase64, box.label)
                                             }
                                         }
                                     }
@@ -483,25 +507,97 @@ fun IngestionScreen(
                 )
             }
         }
+
+        normalizationReviewItem?.let { item ->
+            if (item.status == IngestionStatus.NORMALIZATION_REVIEW) {
+                NormalizationReviewBottomSheet(
+                    item = item,
+                    onDismiss = { normalizationReviewId = null },
+                    onAccept = { useNormalized ->
+                        normalizationReviewId = null
+                        scope.launch { runFinalizePipeline(item, useNormalized) }
+                    }
+                )
+            }
+        }
+
+        cropDialogPath?.let { path ->
+            ImageCropDialog(
+                imagePath = path,
+                title = "Crop Garment",
+                onDismiss = { cropDialogPath = null },
+                onConfirm = { left, top, width, height ->
+                    val imagePath = cropDialogPath
+                    cropDialogPath = null
+                    scope.launch {
+                        val cropBase64 = cropImageToBase64(imagePath ?: return@launch, left, top, width, height)
+                        if (cropBase64.isNullOrEmpty()) {
+                            showToast("Failed to crop image.")
+                            return@launch
+                        }
+                        ClosetRepository.queueIngestionItems(listOf(imagePath))
+                        val item = ClosetRepository.ingestionQueue.value.find { it.originalImageUrl == imagePath }
+                        if (item != null) {
+                            ClosetRepository.updateIngestionItemCrop(item.id, "Manual Upload", cropBase64)
+                            runNormalizePipeline(item.id, cropBase64, "Manual Upload")
+                        }
+                    }
+                }
+            )
+        }
     }
 }
 
 private suspend fun runNormalizePipeline(
     itemId: String,
     cropBase64: String,
-    label: String,
-    sourceImageId: String? = null
+    label: String
 ) {
-    ClosetRepository.updateIngestionItemProgress(itemId, IngestionStatus.NORMALIZATION, 0.4f, "Isolating & Normalizing garment...")
-    val garment = normalizeAndFinalizeGarment(cropBase64, label, sourceImageId)
-    if (garment != null) {
-        ClosetRepository.updateIngestionItemProgress(itemId, IngestionStatus.READY, 1.0f, "Ingestion Pipeline Completed!", garment)
-    } else {
+    ClosetRepository.updateIngestionItemProgress(itemId, IngestionStatus.NORMALIZATION, 0.5f, "Normalizing garment with AI...")
+    val result = normalizeGarmentCrop(cropBase64, label)
+    if (result != null) {
+        ClosetRepository.updateIngestionItemNormalized(itemId, result.imageBase64)
         ClosetRepository.updateIngestionItemProgress(
             itemId,
+            IngestionStatus.NORMALIZATION_REVIEW,
+            0.85f,
+            "Review normalized image before continuing"
+        )
+    } else {
+        ClosetRepository.updateIngestionItemNormalized(itemId, cropBase64)
+        ClosetRepository.updateIngestionItemProgress(
+            itemId,
+            IngestionStatus.NORMALIZATION_REVIEW,
+            0.85f,
+            "Normalization unavailable — review original crop"
+        )
+    }
+}
+
+private suspend fun runFinalizePipeline(item: IngestionItem, useNormalized: Boolean) {
+    val cropBase64 = item.cropBase64 ?: return
+    val label = item.label ?: "garment"
+    val imageBase64 = if (useNormalized) {
+        item.normalizedBase64 ?: cropBase64
+    } else {
+        cropBase64
+    }
+
+    ClosetRepository.updateIngestionItemProgress(
+        item.id,
+        IngestionStatus.FLORENCE_2,
+        0.92f,
+        if (useNormalized) "Extracting attributes from normalized image..." else "Using original crop — extracting attributes..."
+    )
+    val garment = finalizeGarment(imageBase64, cropBase64, label, item.sourceImageId)
+    if (garment != null) {
+        ClosetRepository.updateIngestionItemProgress(item.id, IngestionStatus.READY, 1.0f, "Ready for review sweep", garment)
+    } else {
+        ClosetRepository.updateIngestionItemProgress(
+            item.id,
             IngestionStatus.FAILED,
             1.0f,
-            "Failed to normalize/finalize garment. Tap Retry to try again."
+            "Failed to finalize garment. Tap Retry to try again."
         )
     }
 }
@@ -509,10 +605,26 @@ private suspend fun runNormalizePipeline(
 private suspend fun retryIngestionItem(item: IngestionItem) {
     val cropBase64 = item.cropBase64
     val label = item.label
-    if (!cropBase64.isNullOrEmpty() && !label.isNullOrEmpty()) {
-        runNormalizePipeline(item.id, cropBase64, label)
-    } else {
-        simulateGarmentPipeline(item)
+    when (item.status) {
+        IngestionStatus.NORMALIZATION_REVIEW -> {
+            if (!cropBase64.isNullOrEmpty()) {
+                runFinalizePipeline(item, useNormalized = true)
+            }
+        }
+        IngestionStatus.FAILED -> {
+            if (!cropBase64.isNullOrEmpty() && !label.isNullOrEmpty()) {
+                runNormalizePipeline(item.id, cropBase64, label)
+            } else {
+                simulateGarmentPipeline(item)
+            }
+        }
+        else -> {
+            if (!cropBase64.isNullOrEmpty() && !label.isNullOrEmpty()) {
+                runNormalizePipeline(item.id, cropBase64, label)
+            } else {
+                simulateGarmentPipeline(item)
+            }
+        }
     }
 }
 
@@ -573,7 +685,9 @@ private suspend fun simulateGarmentPipeline(item: IngestionItem) {
 fun BulkCameraOnramp(
     queue: List<IngestionItem>,
     onSelectPhotos: () -> Unit,
+    onManualUpload: () -> Unit,
     onOpenSweep: (String) -> Unit,
+    onOpenNormalizationReview: (String) -> Unit,
     onRetry: (IngestionItem) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -597,6 +711,14 @@ fun BulkCameraOnramp(
                 modifier = Modifier.fillMaxWidth(),
                 icon = Icons.Default.PhotoLibrary
             )
+            Spacer(modifier = Modifier.height(8.dp))
+            ElegantButton(
+                text = "Manual Upload & Crop",
+                onClick = onManualUpload,
+                modifier = Modifier.fillMaxWidth(),
+                isSecondary = true,
+                icon = Icons.Default.Upload
+            )
         }
 
         Row(
@@ -613,9 +735,14 @@ fun BulkCameraOnramp(
             )
             
             val readyCount = queue.count { it.status == IngestionStatus.READY }
-            if (readyCount > 0) {
+            val reviewCount = queue.count { it.status == IngestionStatus.NORMALIZATION_REVIEW }
+            if (readyCount > 0 || reviewCount > 0) {
                 Text(
-                    text = "$readyCount Ready for Sweep",
+                    text = buildString {
+                        if (reviewCount > 0) append("$reviewCount Awaiting Review")
+                        if (reviewCount > 0 && readyCount > 0) append(" · ")
+                        if (readyCount > 0) append("$readyCount Ready for Sweep")
+                    },
                     fontFamily = OutfitFont,
                     fontSize = 13.sp,
                     color = AccentGold
@@ -642,7 +769,7 @@ fun BulkCameraOnramp(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(queue) { item ->
-                    PipelineItemRow(item, onOpenSweep, onRetry)
+                    PipelineItemRow(item, onOpenSweep, onOpenNormalizationReview, onRetry)
                 }
             }
         }
@@ -653,11 +780,18 @@ fun BulkCameraOnramp(
 fun PipelineItemRow(
     item: IngestionItem,
     onOpenSweep: (String) -> Unit,
+    onOpenNormalizationReview: (String) -> Unit,
     onRetry: (IngestionItem) -> Unit
 ) {
     val progressBrush = Brush.linearGradient(listOf(AccentGold, AccentGoldMuted))
     val garment = item.detectedGarment
     val isReadyForSweep = item.status == IngestionStatus.READY && garment != null
+    val isNormalizationReview = item.status == IngestionStatus.NORMALIZATION_REVIEW
+    val isProcessing = item.status == IngestionStatus.NORMALIZATION ||
+        item.status == IngestionStatus.PRE_FLIGHT ||
+        item.status == IngestionStatus.GROUNDING_DINO ||
+        item.status == IngestionStatus.FLORENCE_2 ||
+        item.status == IngestionStatus.FASHION_CLIP
 
     Box(
         modifier = Modifier
@@ -668,16 +802,17 @@ fun PipelineItemRow(
                 0.5.dp,
                 when (item.status) {
                     IngestionStatus.READY -> AccentGold
+                    IngestionStatus.NORMALIZATION_REVIEW -> AccentGold.copy(alpha = 0.7f)
                     IngestionStatus.FAILED -> Color.Red
                     else -> GlassBorder
                 },
                 RoundedCornerShape(12.dp)
             )
             .then(
-                if (isReadyForSweep) {
-                    Modifier.clickable { onOpenSweep(item.id) }
-                } else {
-                    Modifier
+                when {
+                    isReadyForSweep -> Modifier.clickable { onOpenSweep(item.id) }
+                    isNormalizationReview -> Modifier.clickable { onOpenNormalizationReview(item.id) }
+                    else -> Modifier
                 }
             )
             .padding(12.dp)
@@ -696,11 +831,13 @@ fun PipelineItemRow(
                     contentAlignment = Alignment.Center
                 ) {
                     val previewPath = garment?.straightenedImageUrl ?: garment?.imageUrl
-                    val cropBitmap = remember(item.cropBase64) {
-                        if (!item.cropBase64.isNullOrEmpty()) {
-                            decodeBase64ToBitmap(item.cropBase64)
-                        } else {
-                            null
+                    val cropBitmap = remember(item.cropBase64, item.normalizedBase64, item.status) {
+                        when {
+                            item.status == IngestionStatus.NORMALIZATION_REVIEW && !item.normalizedBase64.isNullOrEmpty() ->
+                                decodeBase64ToBitmap(item.normalizedBase64)
+                            !item.cropBase64.isNullOrEmpty() ->
+                                decodeBase64ToBitmap(item.cropBase64)
+                            else -> null
                         }
                     }
                     if (cropBitmap != null) {
@@ -754,6 +891,14 @@ fun PipelineItemRow(
                             )
                         }
                     }
+
+                    if (isProcessing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(28.dp),
+                            color = AccentGold,
+                            strokeWidth = 2.dp
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(16.dp))
@@ -786,6 +931,22 @@ fun PipelineItemRow(
                             ) {
                                 Text(
                                     text = "Confirm",
+                                    fontFamily = OutfitFont,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ObsidianBg
+                                )
+                            }
+                        } else if (isNormalizationReview) {
+                            Button(
+                                onClick = { onOpenNormalizationReview(item.id) },
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentGold),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Text(
+                                    text = "Review",
                                     fontFamily = OutfitFont,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
@@ -827,6 +988,7 @@ fun PipelineItemRow(
                         fontSize = 11.sp,
                         color = when (item.status) {
                             IngestionStatus.READY -> AccentGold
+                            IngestionStatus.NORMALIZATION_REVIEW -> AccentGold.copy(alpha = 0.8f)
                             IngestionStatus.FAILED -> Color.Red.copy(alpha = 0.8f)
                             else -> TextMuted
                         }
