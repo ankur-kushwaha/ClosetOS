@@ -43,21 +43,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 @Composable
-fun IngestionScreen(
-    sharedUrl: String? = null
-) {
-    var activeTab by remember { mutableStateOf(0) } // 0: Bulk, 1: Receipt, 2: Retailer
+fun IngestionScreen() {
     val queue by ClosetRepository.ingestionQueue.collectAsState()
     val scope = rememberCoroutineScope()
 
-    var retailerUrl by remember { mutableStateOf(sharedUrl ?: "") }
-    var isFetchingLink by remember { mutableStateOf(false) }
-
-    val clipboardManager = LocalClipboardManager.current
-    var serverIpInput by remember {
-        mutableStateOf(PlatformStorage.loadString("backend_ip") ?: defaultBackendUrl())
-    }
-    var connectionStatus by remember { mutableStateOf("Unknown") } // "Checking", "Connected", "Failed", "Unknown"
 
     var interactivePhotoPath by remember { mutableStateOf<String?>(null) }
     var detectedBoxes by remember { mutableStateOf<List<com.closetos.app.data.model.DetectedBox>?>(null) }
@@ -104,55 +93,9 @@ fun IngestionScreen(
             subtitle = "Add items to your virtual wardrobe via three instant on-ramps."
         )
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(
-                        when (connectionStatus) {
-                            "Connected" -> Color(0xFF4CAF50)
-                            "Failed" -> Color(0xFFF44336)
-                            "Checking" -> AccentGold
-                            else -> Color.Gray
-                        }
-                    )
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Server IP: ${serverIpInput.replace("http://", "").replace("https://", "")}",
-                fontFamily = OutfitFont,
-                fontSize = 12.sp,
-                color = TextMuted
-            )
-        }
 
-        // Segmented Tabs
-        TabRow(
-            selectedTabIndex = activeTab,
-            containerColor = Color.Transparent,
-            contentColor = AccentGold,
-            indicator = { tabPositions ->
-                TabRowDefaults.SecondaryIndicator(
-                    modifier = Modifier.tabIndicatorOffset(tabPositions[activeTab]),
-                    color = AccentGold
-                )
-            },
-            divider = { Divider(color = GlassBorder, thickness = 0.5.dp) },
-            modifier = Modifier.padding(bottom = 16.dp)
-        ) {
-            Tab(
-                selected = activeTab == 0,
-                onClick = { activeTab = 0 },
-                text = { Text("Bulk Camera", fontFamily = OutfitFont, fontSize = 14.sp) },
-                icon = { Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(20.dp)) }
-            )
-        }
+
+
 
         val galleryLauncher = rememberImagePickerLauncher { localPaths ->
             if (localPaths.isNotEmpty()) {
@@ -195,40 +138,17 @@ fun IngestionScreen(
 
         // Tab Content Panel
         Box(modifier = Modifier.weight(1f)) {
-            when (activeTab) {
-                0 -> BulkCameraOnramp(
-                    queue = queue,
-                    onSelectPhotos = { galleryLauncher() },
-                    onCapturePhoto = { cameraLauncher() },
-                    onOpenSweep = { sweepItemId = it },
-                    onOpenNormalizationReview = { normalizationReviewId = it },
-                    onCancel = { cancelProcessing(it) },
-                    onRetry = { item ->
-                        startPipeline(item.id) { retryIngestionItem(item) }
-                    }
-                )
-                1 -> ReceiptForwardOnramp(
-                    email = "ankur.wardrobe@closet.os",
-                    onCopyEmail = { clipboardManager.setText(AnnotatedString("ankur.wardrobe@closet.os")) }
-                )
-                2 -> RetailerLinkOnramp(
-                    url = retailerUrl,
-                    onUrlChange = { retailerUrl = it },
-                    isFetching = isFetchingLink,
-                    onFetch = {
-                        isFetchingLink = true
-                        scope.launch {
-                            delay(1500)
-                            isFetchingLink = false
-                            retailerUrl = ""
-                            ClosetRepository.queueIngestionItems(listOf("retailer_fetched_silk_dress.jpg"))
-                            val parsedItem = ClosetRepository.ingestionQueue.value.last()
-                            launch { simulateGarmentPipeline(parsedItem) }
-                            activeTab = 0
-                        }
-                    }
-                )
-            }
+            BulkCameraOnramp(
+                queue = queue,
+                onSelectPhotos = { galleryLauncher() },
+                onCapturePhoto = { cameraLauncher() },
+                onOpenSweep = { sweepItemId = it },
+                onOpenNormalizationReview = { normalizationReviewId = it },
+                onCancel = { cancelProcessing(it) },
+                onRetry = { item ->
+                    startPipeline(item.id) { retryIngestionItem(item) }
+                }
+            )
         }
 
         // Multi-Garment Interactive Selection Dialog
@@ -623,8 +543,6 @@ fun BulkCameraOnramp(
     onCancel: (String) -> Unit,
     onRetry: (IngestionItem) -> Unit
 ) {
-    var showImportDialog by remember { mutableStateOf(false) }
-
     Column(modifier = Modifier.fillMaxSize()) {
         GlassmorphicCard(
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
@@ -640,82 +558,22 @@ fun BulkCameraOnramp(
                 style = MaterialTheme.typography.bodyMedium
             )
             Spacer(modifier = Modifier.height(16.dp))
-            ElegantButton(
-                text = "Import Image(s)",
-                onClick = { showImportDialog = true },
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                icon = Icons.Default.PhotoLibrary
-            )
-        }
-
-        if (showImportDialog) {
-            Dialog(
-                onDismissRequest = { showImportDialog = false }
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth(0.85f)
-                        .border(1.dp, GlassBorder, RoundedCornerShape(16.dp)),
-                    shape = RoundedCornerShape(16.dp),
-                    color = ObsidianBg
-                ) {
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = "Import Source",
-                            fontFamily = PlayfairFont,
-                            fontWeight = FontWeight.Bold,
-                            color = AccentGold,
-                            fontSize = 18.sp,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-                        Text(
-                            text = "Choose how you want to add garments to your virtual wardrobe.",
-                            fontFamily = OutfitFont,
-                            color = TextMuted,
-                            fontSize = 13.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(bottom = 20.dp)
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            ElegantButton(
-                                text = "Camera",
-                                onClick = {
-                                    showImportDialog = false
-                                    onCapturePhoto()
-                                },
-                                modifier = Modifier.weight(1f),
-                                icon = Icons.Default.CameraAlt
-                            )
-                            ElegantButton(
-                                text = "Gallery",
-                                onClick = {
-                                    showImportDialog = false
-                                    onSelectPhotos()
-                                },
-                                modifier = Modifier.weight(1f),
-                                icon = Icons.Default.PhotoLibrary
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        TextButton(
-                            onClick = { showImportDialog = false }
-                        ) {
-                            Text(
-                                text = "Cancel",
-                                color = TextMuted,
-                                fontFamily = OutfitFont,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                        }
-                    }
-                }
+                ElegantButton(
+                    text = "Camera",
+                    onClick = onCapturePhoto,
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Default.CameraAlt
+                )
+                ElegantButton(
+                    text = "Gallery",
+                    onClick = onSelectPhotos,
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Default.PhotoLibrary
+                )
             }
         }
 

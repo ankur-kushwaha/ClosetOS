@@ -289,9 +289,7 @@ fun App() {
                     } else {
                         when (activeRoute) {
                             Screen.Ootd.route -> OotdScreen()
-                            Screen.Ingest.route -> IngestionScreen(
-                                sharedUrl = null
-                            )
+                            Screen.Ingest.route -> IngestionScreen()
                             Screen.Wardrobe.route -> WardrobeScreen()
                             Screen.Builder.route -> LookbookScreen()
                             Screen.Travel.route -> TripPlannerScreen()
