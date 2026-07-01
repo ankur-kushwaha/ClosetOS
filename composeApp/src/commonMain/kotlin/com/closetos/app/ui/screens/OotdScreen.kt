@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -160,7 +161,7 @@ fun OotdScreen() {
             }
         }
 
-        Divider(color = GoldBorder, thickness = 0.5.dp, modifier = Modifier.padding(bottom = 16.dp))
+        HorizontalDivider(color = GoldBorder, thickness = 0.5.dp, modifier = Modifier.padding(bottom = 16.dp))
 
         if (activeOutfit == null) {
             Box(
@@ -250,7 +251,7 @@ fun OotdScreen() {
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Icon(
-                                imageVector = Icons.Default.DirectionsRun,
+                                imageVector = Icons.AutoMirrored.Filled.DirectionsRun,
                                 contentDescription = "Digital Twin Canvas",
                                 tint = AccentGold.copy(alpha = 0.10f),
                                 modifier = Modifier.size(140.dp)

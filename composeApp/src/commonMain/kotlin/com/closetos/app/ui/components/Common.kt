@@ -227,7 +227,7 @@ fun SectionHeader(
             )
         }
         Spacer(modifier = Modifier.height(12.dp))
-        Divider(
+        HorizontalDivider(
             color = if (isDarkThemeGlobal) Color(0x1AFFFFFF) else AirbnbBorder,
             thickness = 1.dp,
             modifier = Modifier.fillMaxWidth()

@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -139,7 +140,7 @@ fun GarmentCard(
     similarityScore: Float?,
     onClick: () -> Unit
 ) {
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(230.dp)
@@ -152,13 +153,15 @@ fun GarmentCard(
             )
             .clickable { onClick() }
     ) {
-        // 1. Large Image Preview / Color placeholder
+        // 1. Full height Image Preview / Color placeholder
+        val imagePath = garment.straightenedImageUrl.ifEmpty { garment.imageUrl }
+        val bitmap = if (imagePath.isNotEmpty()) rememberImageBitmap(imagePath) else null
+
         Box(
             modifier = Modifier
-                .weight(1.3f)
-                .fillMaxWidth()
+                .fillMaxSize()
                 .background(
-                    if (garment.straightenedImageUrl.isEmpty() && garment.imageUrl.isEmpty()) {
+                    if (bitmap == null) {
                         garmentPreviewColor(garment.labColor)
                     } else {
                         Color.Transparent
@@ -166,9 +169,6 @@ fun GarmentCard(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            val imagePath = garment.straightenedImageUrl.ifEmpty { garment.imageUrl }
-            val bitmap = if (imagePath.isNotEmpty()) rememberImageBitmap(imagePath) else null
-
             if (bitmap != null) {
                 Image(
                     bitmap = bitmap,
@@ -184,35 +184,49 @@ fun GarmentCard(
                     modifier = Modifier.size(36.dp)
                 )
             }
+        }
 
-            // Floating Similarity Match Badge
-            if (similarityScore != null) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(8.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(AirbnbCoral)
-                        .padding(horizontal = 6.dp, vertical = 3.dp)
-                ) {
-                    Text(
-                        text = "${(similarityScore * 100).toInt()}% match",
-                        fontFamily = OutfitFont,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+        // 2. Gradient Overlay for text readability (Fade from transparent to black)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color.Black.copy(alpha = 0.4f),
+                            Color.Black.copy(alpha = 0.85f)
+                        )
                     )
-                }
+                )
+        )
+
+        // 3. Floating Similarity Match Badge (Top End)
+        if (similarityScore != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(AirbnbCoral)
+                    .padding(horizontal = 6.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    text = "${(similarityScore * 100).toInt()}% match",
+                    fontFamily = OutfitFont,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
             }
         }
 
-        // 2. Text Details
+        // 4. Text Details (Overlayed on bottom)
         Column(
             modifier = Modifier
-                .weight(1f)
+                .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.Center
+                .padding(12.dp)
         ) {
             Text(
                 text = garment.brand,
@@ -223,20 +237,22 @@ fun GarmentCard(
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
             )
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = garment.subcategory,
                 fontFamily = PlayfairFont,
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
-                color = TextLight,
+                color = Color.White,
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
             )
+            Spacer(modifier = Modifier.height(1.dp))
             Text(
                 text = garment.colorName,
                 fontFamily = OutfitFont,
                 fontSize = 11.sp,
-                color = TextMuted,
+                color = Color.White.copy(alpha = 0.75f),
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
             )

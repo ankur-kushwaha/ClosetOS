@@ -260,7 +260,7 @@ private suspend fun fetchWeatherForCoordinates(lat: Double, lon: Double, locatio
     }
 }
 
-actual fun defaultBackendUrl(): String = "http://127.0.0.1:8000"
+actual fun defaultBackendUrl(): String = PlatformStorage.loadString("backend_ip")?.trim() ?: "http://127.0.0.1:8000"
 
 private fun jsDateNow(): Double = js("Date.now()")
 

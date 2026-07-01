@@ -577,7 +577,7 @@ fun OutfitDetailScreen(
             }
         }
 
-        Divider(
+        HorizontalDivider(
             color = GoldBorder,
             thickness = 0.5.dp,
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp)
