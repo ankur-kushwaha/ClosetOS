@@ -88,6 +88,15 @@ data class WearEvent(
     val selfieUrl: String? = null
 )
 
+data class DetectedBox(
+    val bbox: List<Int>,
+    val label: String,
+    val score: Float,
+    val cropBase64: String,
+    val isSelected: Boolean = true,
+    val sourceImageId: String? = null
+)
+
 data class IngestionItem(
     val id: String = generateUUID(),
     val originalImageUrl: String,

@@ -1,7 +1,7 @@
 """
 Digitization pipeline orchestrator.
 
-Upload → Grounded-SAM-2 → Quality Validation → Normalization →
+Upload → YOLO-World + SAM → Quality Validation → Normalization →
 Florence-2 → FashionCLIP → PostgreSQL + pgvector
 """
 
@@ -74,7 +74,7 @@ def map_to_try_on_subcategory(ui_subcategory):
 
 PIPELINE_STEPS = [
     {"name": "UPLOAD", "label": "Uploading and validating image..."},
-    {"name": "GROUNDED_SAM2", "label": "Grounded-SAM-2: Detection + segmentation..."},
+    {"name": "GROUNDED_SAM2", "label": "YOLO-World + SAM: Detection + segmentation..."},
     {"name": "QUALITY_VALIDATION", "label": "Quality validation..."},
     {"name": "NORMALIZATION", "label": "Normalization (GPT Image / FLUX Kontext)..."},
     {"name": "FLORENCE_2", "label": "Florence-2: Attribute extraction..."},
@@ -106,6 +106,7 @@ def run_digitize_pipeline(
     db_manager: DatabaseManager,
     update_job_step: Callable,
     executor=None,
+    custom_boxes=None,
 ):
     loaders = ModelLoaders(device)
     try:
@@ -121,13 +122,16 @@ def run_digitize_pipeline(
         image.save(os.path.join(job_dir, "source_image.jpg"))
         update_job_step(job_id, 0, "completed", 1.0, f"Loaded photo ({width}x{height})")
 
-        # ── Step 2: GROUNDED_SAM2 — detect all garments ──
-        update_job_step(job_id, 1, "running", 0.4, "Grounded-SAM-2: Detecting garments...")
-        boxes_to_process = detect_garments(image, device, loaders)
+        # ── Step 2: GROUNDED_SAM2 — detect or use custom garments ──
+        update_job_step(job_id, 1, "running", 0.4, "YOLO-World + SAM: Processing garments...")
+        if custom_boxes is not None:
+            boxes_to_process = custom_boxes
+        else:
+            boxes_to_process = detect_garments(image, device, loaders)
         num_garments = len(boxes_to_process)
         update_job_step(
             job_id, 1, "completed", 1.0,
-            f"Grounded-SAM-2: Detected {num_garments} garment(s)",
+            f"YOLO-World + SAM: Processing {num_garments} garment(s)",
         )
 
         garment_results = []
@@ -141,7 +145,7 @@ def run_digitize_pipeline(
             # Segment within GROUNDED_SAM2 step
             update_job_step(
                 job_id, 1, "running", 0.5 + (0.5 * g_idx / max(num_garments, 1)),
-                f"Grounded-SAM-2: Segmenting {item_label}",
+                f"YOLO-World + SAM: Segmenting {item_label}",
             )
             binary_mask, masked, original_crop, tight_box = segment_garment(
                 image, box, device, loaders

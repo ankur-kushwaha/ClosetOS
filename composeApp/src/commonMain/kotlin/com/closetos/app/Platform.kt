@@ -33,3 +33,13 @@ expect suspend fun testBackendConnection(baseUrl: String): Boolean
 
 expect fun defaultBackendUrl(): String
 
+expect suspend fun runGarmentDetection(path: String): List<com.closetos.app.data.model.DetectedBox>?
+
+expect suspend fun normalizeAndFinalizeGarment(
+    cropBase64: String,
+    label: String,
+    sourceImageId: String? = null
+): Garment?
+
+expect fun decodeBase64ToBitmap(base64: String): ImageBitmap?
+

@@ -527,3 +527,240 @@ actual suspend fun testBackendConnection(baseUrl: String): Boolean {
         }
     }
 }
+
+actual suspend fun runGarmentDetection(path: String): List<com.closetos.app.data.model.DetectedBox>? {
+    val context = PlatformStorage.applicationContext ?: return null
+    return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        var connection: java.net.HttpURLConnection? = null
+        try {
+            val file = File(path)
+            if (!file.exists()) return@withContext null
+
+            val savedIp = PlatformStorage.loadString("backend_ip")?.trim() ?: "http://10.0.2.2:8000"
+            val baseUrl = if (savedIp.startsWith("http://") || savedIp.startsWith("https://")) {
+                savedIp
+            } else {
+                "http://$savedIp"
+            }
+            
+            val detectUrl = "${baseUrl.trimEnd('/')}/yolo-world/detect"
+            val url = java.net.URL(detectUrl)
+            connection = url.openConnection() as java.net.HttpURLConnection
+            val boundary = "===Boundary-${System.currentTimeMillis()}==="
+            
+            connection.doOutput = true
+            connection.doInput = true
+            connection.useCaches = false
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 15000
+            connection.readTimeout = 15000
+            connection.setRequestProperty("Connection", "Keep-Alive")
+            connection.setRequestProperty("User-Agent", "Android Ingest")
+            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+
+            connection.outputStream.use { out ->
+                val writer = java.io.PrintWriter(java.io.OutputStreamWriter(out, "UTF-8"), true)
+                writer.append("--$boundary").append("\r\n")
+                writer.append("Content-Disposition: form-data; name=\"file\"; filename=\"${file.name}\"").append("\r\n")
+                writer.append("Content-Type: image/jpeg").append("\r\n")
+                writer.append("\r\n").flush()
+
+                file.inputStream().use { input ->
+                    input.copyTo(out)
+                }
+                out.flush()
+                writer.append("\r\n")
+                writer.append("--$boundary--").append("\r\n").flush()
+            }
+
+            val code = connection.responseCode
+            if (code != java.net.HttpURLConnection.HTTP_OK) {
+                return@withContext null
+            }
+
+            val jsonResponse = connection.inputStream.bufferedReader().use { it.readText() }
+            val root = org.json.JSONObject(jsonResponse)
+            val sourceImageId = root.optString("source_image_id", "")
+            val bboxesArray = root.getJSONArray("bboxes")
+            val labelsArray = root.getJSONArray("labels")
+            val scoresArray = root.getJSONArray("scores")
+            val cropsArray = root.getJSONArray("crops_base64")
+            
+            val list = mutableListOf<com.closetos.app.data.model.DetectedBox>()
+            for (i in 0 until bboxesArray.length()) {
+                val bboxJson = bboxesArray.getJSONArray(i)
+                val bbox = listOf(
+                    bboxJson.getInt(0),
+                    bboxJson.getInt(1),
+                    bboxJson.getInt(2),
+                    bboxJson.getInt(3)
+                )
+                val label = labelsArray.getString(i)
+                val score = scoresArray.getDouble(i).toFloat()
+                val cropBase64 = cropsArray.getString(i)
+                
+                list.add(
+                    com.closetos.app.data.model.DetectedBox(
+                        bbox = bbox,
+                        label = label,
+                        score = score,
+                        cropBase64 = cropBase64,
+                        sourceImageId = if (sourceImageId.isNotEmpty()) sourceImageId else null
+                    )
+                )
+            }
+            list
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        } finally {
+            connection?.disconnect()
+        }
+    }
+}
+
+actual suspend fun normalizeAndFinalizeGarment(
+    cropBase64: String,
+    label: String,
+    sourceImageId: String?
+): Garment? {
+    val context = PlatformStorage.applicationContext ?: return null
+    return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        var normalizeConn: java.net.HttpURLConnection? = null
+        var finalizeConn: java.net.HttpURLConnection? = null
+        try {
+            val savedIp = PlatformStorage.loadString("backend_ip")?.trim() ?: "http://10.0.2.2:8000"
+            val baseUrl = if (savedIp.startsWith("http://") || savedIp.startsWith("https://")) {
+                savedIp
+            } else {
+                "http://$savedIp"
+            }
+            
+            // --- Step 1: POST /yolo-world/gpt-normalize ---
+            val normalizeUrl = "${baseUrl.trimEnd('/')}/yolo-world/gpt-normalize"
+            val url1 = java.net.URL(normalizeUrl)
+            normalizeConn = url1.openConnection() as java.net.HttpURLConnection
+            normalizeConn.doOutput = true
+            normalizeConn.doInput = true
+            normalizeConn.useCaches = false
+            normalizeConn.requestMethod = "POST"
+            normalizeConn.connectTimeout = 40000
+            normalizeConn.readTimeout = 40000
+            normalizeConn.setRequestProperty("Content-Type", "application/json")
+            
+            val normPayload = org.json.JSONObject()
+            normPayload.put("crop_base64", cropBase64)
+            normPayload.put("label", label)
+            
+            normalizeConn.outputStream.use { out ->
+                out.write(normPayload.toString().toByteArray(charset("UTF-8")))
+                out.flush()
+            }
+            
+            val code1 = normalizeConn.responseCode
+            if (code1 != java.net.HttpURLConnection.HTTP_OK) {
+                return@withContext null
+            }
+            
+            val res1 = normalizeConn.inputStream.bufferedReader().use { it.readText() }
+            val root1 = org.json.JSONObject(res1)
+            val normalizedBase64 = root1.getString("image_base64")
+            normalizeConn.disconnect()
+            
+            // --- Step 2: POST /yolo-world/finalize ---
+            val finalizeUrl = "${baseUrl.trimEnd('/')}/yolo-world/finalize"
+            val url2 = java.net.URL(finalizeUrl)
+            finalizeConn = url2.openConnection() as java.net.HttpURLConnection
+            finalizeConn.doOutput = true
+            finalizeConn.doInput = true
+            finalizeConn.useCaches = false
+            finalizeConn.requestMethod = "POST"
+            finalizeConn.connectTimeout = 30000
+            finalizeConn.readTimeout = 30000
+            finalizeConn.setRequestProperty("Content-Type", "application/json")
+            
+            val finalPayload = org.json.JSONObject()
+            finalPayload.put("image_base64", normalizedBase64)
+            finalPayload.put("crop_base64", cropBase64)
+            finalPayload.put("label", label)
+            if (sourceImageId != null) {
+                finalPayload.put("source_image_id", sourceImageId)
+            }
+            
+            finalizeConn.outputStream.use { out ->
+                out.write(finalPayload.toString().toByteArray(charset("UTF-8")))
+                out.flush()
+            }
+            
+            val code2 = finalizeConn.responseCode
+            if (code2 != java.net.HttpURLConnection.HTTP_OK) {
+                return@withContext null
+            }
+            
+            val res2 = finalizeConn.inputStream.bufferedReader().use { it.readText() }
+            val root2 = org.json.JSONObject(res2)
+            
+            val garmentId = root2.getString("garment_id")
+            val base64Img = root2.getString("image_base64")
+            val straightenedBase64Img = root2.optString("straightened_image_base64", base64Img)
+            val attr = root2.getJSONObject("attributes")
+
+            // Write image files to local application cache
+            val pngBytes = android.util.Base64.decode(base64Img, android.util.Base64.DEFAULT)
+            val croppedFile = File(context.filesDir, "cropped_server_${System.currentTimeMillis()}.png")
+            FileOutputStream(croppedFile).use { fos ->
+                fos.write(pngBytes)
+            }
+
+            val straightenedPngBytes = android.util.Base64.decode(straightenedBase64Img, android.util.Base64.DEFAULT)
+            val straightenedFile = File(context.filesDir, "straightened_server_${System.currentTimeMillis()}.png")
+            FileOutputStream(straightenedFile).use { fos ->
+                fos.write(straightenedPngBytes)
+            }
+
+            val embedArray = attr.getJSONArray("embedding")
+            val embedding = FloatArray(512) { embedArray.getDouble(it).toFloat() }
+
+            val labArray = attr.getJSONArray("labColor")
+            val labColor = FloatArray(3) { labArray.getDouble(it).toFloat() }
+
+            val seasonsArray = attr.getJSONArray("seasons")
+            val seasons = List(seasonsArray.length()) { seasonsArray.getString(it) }
+
+            Garment(
+                category = attr.getString("category"),
+                subcategory = attr.getString("subcategory"),
+                colorName = attr.getString("colorName"),
+                labColor = labColor,
+                material = attr.getString("material"),
+                pattern = attr.getString("pattern"),
+                fit = attr.getString("fit"),
+                seasons = seasons,
+                formalityScore = attr.getDouble("formalityScore").toFloat(),
+                silhouette = attr.getString("silhouette"),
+                brand = attr.optString("brand", "Inferred"),
+                price = attr.optDouble("price", 0.0),
+                imageUrl = croppedFile.absolutePath,
+                straightenedImageUrl = straightenedFile.absolutePath,
+                embedding = embedding
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        } finally {
+            normalizeConn?.disconnect()
+            finalizeConn?.disconnect()
+        }
+    }
+}
+
+actual fun decodeBase64ToBitmap(base64: String): ImageBitmap? {
+    return try {
+        val decodedString = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+        val decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.size)
+        decodedByte.asImageBitmap()
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}

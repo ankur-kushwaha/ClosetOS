@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -55,6 +56,10 @@ fun IngestionScreen(
         mutableStateOf(PlatformStorage.loadString("backend_ip") ?: defaultBackendUrl())
     }
     var connectionStatus by remember { mutableStateOf("Unknown") } // "Checking", "Connected", "Failed", "Unknown"
+
+    var interactivePhotoPath by remember { mutableStateOf<String?>(null) }
+    var detectedBoxes by remember { mutableStateOf<List<com.closetos.app.data.model.DetectedBox>?>(null) }
+    var isDetectingGarments by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -207,12 +212,13 @@ fun IngestionScreen(
 
         val galleryLauncher = rememberImagePickerLauncher { localPaths ->
             if (localPaths.isNotEmpty()) {
-                ClosetRepository.queueIngestionItems(localPaths)
-                localPaths.forEach { path ->
-                    val item = ClosetRepository.ingestionQueue.value.find { it.originalImageUrl == path }
-                    if (item != null) {
-                        scope.launch { simulateGarmentPipeline(item) }
-                    }
+                val path = localPaths.first()
+                interactivePhotoPath = path
+                isDetectingGarments = true
+                scope.launch {
+                    val result = runGarmentDetection(path)
+                    isDetectingGarments = false
+                    detectedBoxes = result
                 }
             }
         }
@@ -249,6 +255,219 @@ fun IngestionScreen(
                     }
                 )
             }
+        }
+
+        // Multi-Garment Interactive Selection Dialog
+        if (interactivePhotoPath != null) {
+            AlertDialog(
+                onDismissRequest = {
+                    interactivePhotoPath = null
+                    detectedBoxes = null
+                    isDetectingGarments = false
+                },
+                title = {
+                    Text(
+                        text = "Select Garments to Digitize",
+                        fontFamily = PlayfairFont,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentGold,
+                        fontSize = 18.sp
+                    )
+                },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        if (isDetectingGarments) {
+                            CircularProgressIndicator(color = AccentGold)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Analyzing photo for garments...",
+                                fontFamily = OutfitFont,
+                                color = TextMuted,
+                                fontSize = 14.sp
+                            )
+                        } else {
+                            val boxes = detectedBoxes
+                            if (boxes == null || boxes.isEmpty()) {
+                                Text(
+                                    text = "No garments detected in the image.",
+                                    fontFamily = OutfitFont,
+                                    color = TextMuted,
+                                    fontSize = 14.sp
+                                )
+                            } else {
+                                Text(
+                                    text = "Choose which detected items to digitize:",
+                                    fontFamily = OutfitFont,
+                                    color = TextLight,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.padding(bottom = 12.dp)
+                                )
+                                
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    items(boxes.size) { idx ->
+                                        val box = boxes[idx]
+                                        var isChecked by remember { mutableStateOf(box.isSelected) }
+                                        
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF222228))
+                                                .clickable {
+                                                    isChecked = !isChecked
+                                                    detectedBoxes = boxes.mapIndexed { i, b ->
+                                                        if (i == idx) b.copy(isSelected = isChecked) else b
+                                                    }
+                                                }
+                                                .padding(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(44.dp)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(Color.Black),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                val imageBitmap = remember(box.cropBase64) {
+                                                    if (box.cropBase64.isNotEmpty()) {
+                                                        decodeBase64ToBitmap(box.cropBase64)
+                                                    } else {
+                                                        null
+                                                    }
+                                                }
+                                                if (imageBitmap != null) {
+                                                    Image(
+                                                        bitmap = imageBitmap,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                                    )
+                                                } else {
+                                                    Icon(
+                                                        imageVector = when {
+                                                            box.label.contains("shirt", ignoreCase = true) || box.label.contains("top", ignoreCase = true) -> Icons.Default.Checkroom
+                                                            box.label.contains("pant", ignoreCase = true) || box.label.contains("jean", ignoreCase = true) || box.label.contains("bottom", ignoreCase = true) -> Icons.Default.Accessibility
+                                                            else -> Icons.Default.Checkroom
+                                                        },
+                                                        contentDescription = null,
+                                                        tint = if (isChecked) AccentGold else TextMuted
+                                                    )
+                                                }
+                                            }
+                                            
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = box.label.uppercase(),
+                                                    fontFamily = OutfitFont,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
+                                                    color = TextLight
+                                                )
+                                                Text(
+                                                    text = "Confidence: ${(box.score * 100).toInt()}%",
+                                                    fontFamily = OutfitFont,
+                                                    fontSize = 11.sp,
+                                                    color = TextMuted
+                                                )
+                                            }
+                                            
+                                            Checkbox(
+                                                checked = isChecked,
+                                                onCheckedChange = { checked ->
+                                                    isChecked = checked
+                                                    detectedBoxes = boxes.mapIndexed { i, b ->
+                                                        if (i == idx) b.copy(isSelected = checked) else b
+                                                    }
+                                                },
+                                                colors = CheckboxDefaults.colors(
+                                                    checkedColor = AccentGold,
+                                                    uncheckedColor = GlassBorder,
+                                                    checkmarkColor = ObsidianBg
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val path = interactivePhotoPath ?: return@Button
+                            val boxes = detectedBoxes ?: return@Button
+                            val selectedBoxes = boxes.filter { it.isSelected }
+                            
+                            if (selectedBoxes.isNotEmpty()) {
+                                interactivePhotoPath = null
+                                detectedBoxes = null
+                                
+                                scope.launch {
+                                    // Queue a placeholder ingestion item representing the file
+                                    ClosetRepository.queueIngestionItems(listOf(path))
+                                    val item = ClosetRepository.ingestionQueue.value.find { it.originalImageUrl == path }
+                                    if (item != null) {
+                                        // Loop through each selected box sequentially, and run normalize + finalize
+                                        selectedBoxes.forEachIndexed { index, box ->
+                                            val id = if (index == 0) item.id else item.id + "_split_" + index + "_" + getEpochTimeMillis()
+                                            
+                                            // Create a new ingestion item in the queue if it's a split garment
+                                            if (index > 0) {
+                                                val splitItem = com.closetos.app.data.model.IngestionItem(
+                                                    id = id,
+                                                    originalImageUrl = path,
+                                                    status = IngestionStatus.PRE_FLIGHT,
+                                                    progress = 0.0f,
+                                                    stepLabel = "Waiting for normalization..."
+                                                )
+                                                ClosetRepository.addQueuedIngestionItems(listOf(splitItem))
+                                            }
+                                            
+                                            ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.NORMALIZATION, 0.4f, "Isolating & Normalizing garment...")
+                                            val garment = normalizeAndFinalizeGarment(box.cropBase64, box.label, box.sourceImageId)
+                                            if (garment != null) {
+                                                ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.READY, 1.0f, "Ingestion Pipeline Completed!", garment)
+                                            } else {
+                                                ClosetRepository.updateIngestionItemProgress(id, IngestionStatus.FAILED, 1.0f, "Failed to normalize/finalize garment.")
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                showToast("Please select at least one garment.")
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGold),
+                        enabled = !isDetectingGarments && !(detectedBoxes?.filter { it.isSelected }).isNullOrEmpty()
+                    ) {
+                        Text("Submit to Digitize", color = ObsidianBg, fontFamily = OutfitFont, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            interactivePhotoPath = null
+                            detectedBoxes = null
+                            isDetectingGarments = false
+                        }
+                    ) {
+                        Text("Cancel", color = TextMuted, fontFamily = OutfitFont)
+                    }
+                },
+                containerColor = ObsidianBg,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+            )
         }
     }
 }
@@ -410,36 +629,89 @@ fun PipelineItemRow(item: IngestionItem, onReviewClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF2E2E35))
-                    .border(0.5.dp, GlassBorder, RoundedCornerShape(8.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                val previewPath = item.detectedGarment?.imageUrl ?: item.originalImageUrl
-                val bitmap = rememberImageBitmap(previewPath)
-                if (bitmap != null) {
-                    Image(
-                        bitmap = bitmap,
-                        contentDescription = "Thumbnail Preview",
-                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp))
-                    )
-                } else {
-                    Icon(
-                        imageVector = when {
-                            item.originalImageUrl.contains("tshirt") -> Icons.Default.Checkroom
-                            item.originalImageUrl.contains("trousers") -> Icons.Default.Accessibility
-                            else -> Icons.Default.Checkroom
-                        },
-                        contentDescription = null,
-                        tint = when (item.status) {
-                            IngestionStatus.READY -> AccentGold
-                            IngestionStatus.FAILED -> Color.Red
-                            else -> TextMuted
+            val garment = item.detectedGarment
+            if (item.status == IngestionStatus.READY && garment != null) {
+                var sliderValue by remember { mutableStateOf(1f) }
+                
+                Column(
+                    modifier = Modifier
+                        .size(width = 80.dp, height = 96.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF2E2E35))
+                        .border(0.5.dp, GlassBorder, RoundedCornerShape(8.dp)),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val originalBitmap = rememberImageBitmap(garment.imageUrl)
+                        val normalizedBitmap = rememberImageBitmap(garment.straightenedImageUrl ?: garment.imageUrl)
+                        
+                        if (originalBitmap != null) {
+                            Image(
+                                bitmap = originalBitmap,
+                                contentDescription = "Original Crop",
+                                modifier = Modifier.fillMaxSize().alpha(1f - sliderValue),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                            )
                         }
+                        if (normalizedBitmap != null) {
+                            Image(
+                                bitmap = normalizedBitmap,
+                                contentDescription = "Normalized Flatlay",
+                                modifier = Modifier.fillMaxSize().alpha(sliderValue),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                            )
+                        }
+                    }
+                    
+                    Slider(
+                        value = sliderValue,
+                        onValueChange = { sliderValue = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(20.dp)
+                            .padding(horizontal = 4.dp),
+                        colors = SliderDefaults.colors(
+                            thumbColor = AccentGold,
+                            activeTrackColor = AccentGold.copy(alpha = 0.5f),
+                            inactiveTrackColor = Color(0xFF222226)
+                        )
                     )
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF2E2E35))
+                        .border(0.5.dp, GlassBorder, RoundedCornerShape(8.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val previewPath = item.originalImageUrl
+                    val bitmap = rememberImageBitmap(previewPath)
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap,
+                            contentDescription = "Thumbnail Preview",
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp))
+                        )
+                    } else {
+                        Icon(
+                            imageVector = when {
+                                item.originalImageUrl.contains("tshirt") -> Icons.Default.Checkroom
+                                item.originalImageUrl.contains("trousers") -> Icons.Default.Accessibility
+                                else -> Icons.Default.Checkroom
+                            },
+                            contentDescription = null,
+                            tint = when (item.status) {
+                                IngestionStatus.READY -> AccentGold
+                                IngestionStatus.FAILED -> Color.Red
+                                else -> TextMuted
+                            }
+                        )
+                    }
                 }
             }
 
@@ -698,3 +970,5 @@ fun RetailerLinkOnramp(
         }
     }
 }
+
+

@@ -133,66 +133,6 @@ def get_yolo_test_page():
     else:
         raise HTTPException(status_code=404, detail="yolo_test.html not found in static directory")
 
-# 1. POST /digitize/start - Start async job
-@app.post("/digitize/start")
-async def start_digitization_job(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
-    try:
-        contents = await file.read()
-        job_id = str(uuid.uuid4())
-        
-        # Initialize job steps using shared function from orchestrator
-        job_steps = create_job_steps()
-        
-        jobs[job_id] = {
-            "job_id": job_id,
-            "status": "processing",
-            "progress": 0.0,
-            "current_step": "UPLOAD",
-            "steps": job_steps,
-            "garments": [],
-            "error": None
-        }
-        
-        # Dispatch background thread pipeline execution
-        background_tasks.add_task(
-            run_digitize_pipeline,
-            job_id,
-            contents,
-            device,
-            jobs,
-            db_manager,
-            update_job_step,
-            executor
-        )
-        
-        return {"job_id": job_id, "status": "processing"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to submit digitization job: {str(e)}")
-
-# 2. GET /digitize/jobs/{job_id} - Poll job progress
-@app.get("/digitize/jobs/{job_id}")
-def get_digitization_job_status(job_id: str):
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return jobs[job_id]
-
-# 3. POST /digitize/detect - Step 2 (Grounding DINO or Florence-2 phrase grounding)
-@app.post("/digitize/detect")
-async def step_detect(file: UploadFile = File(...)):
-    try:
-        contents = await file.read()
-        os.makedirs(STORAGE_DIR, exist_ok=True)
-        with open(os.path.join(STORAGE_DIR, "debug_image.png"), "wb") as f:
-            f.write(contents)
-        image = Image.open(io.BytesIO(contents)).convert("RGB")
-        image = ImageOps.exif_transpose(image)
-        boxes_to_process = detect_garments(image, device, loaders)
-        bboxes = [item[0] for item in boxes_to_process]
-        labels = [item[1] for item in boxes_to_process]
-        return {"bboxes": bboxes, "labels": labels}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 # YOLO-World custom endpoint
 @app.post("/yolo-world/detect")
 async def yolo_world_detect(file: UploadFile = File(...), confidence: float = 0.15):
@@ -200,6 +140,14 @@ async def yolo_world_detect(file: UploadFile = File(...), confidence: float = 0.
         contents = await file.read()
         image = Image.open(io.BytesIO(contents)).convert("RGB")
         image = ImageOps.exif_transpose(image)
+        
+        # Save source image in temp storage
+        source_id = str(uuid.uuid4())
+        temp_dir = os.path.join(STORAGE_DIR, "temp_sources")
+        os.makedirs(temp_dir, exist_ok=True)
+        source_path = os.path.join(temp_dir, f"{source_id}.jpg")
+        image.save(source_path, "JPEG", quality=95)
+        
         detected_items = detect_yolo_world(image, device, loaders, confidence=confidence)
         bboxes = [item[0] for item in detected_items]
         labels = [item[1] for item in detected_items]
@@ -220,6 +168,7 @@ async def yolo_world_detect(file: UploadFile = File(...), confidence: float = 0.
                 crops_base64.append("")
 
         return {
+            "source_image_id": source_id,
             "bboxes": bboxes,
             "labels": labels,
             "scores": scores,
@@ -238,6 +187,14 @@ class CropPayload(BaseModel):
     crop_base64: str
     label: str
     caption: Optional[str] = None
+
+class FinalizePayload(BaseModel):
+    image_base64: str
+    crop_base64: Optional[str] = None
+    label: str
+    source_image_id: Optional[str] = None
+    brand: Optional[str] = "Inferred"
+    price: Optional[float] = 150.0
 
 class FlorencePayload(BaseModel):
     image_base64: str
@@ -318,58 +275,147 @@ async def gpt_normalize_crop(payload: CropPayload):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-# 4. POST /digitize/segment - SAM segmentation for a bounding box
-@app.post("/digitize/segment")
-async def step_segment(file: UploadFile = File(...), bbox: str = "[50,50,400,500]"):
+@app.post("/yolo-world/finalize")
+async def yolo_world_finalize(payload: FinalizePayload):
     try:
-        box = json.loads(bbox)
-        contents = await file.read()
-        image = Image.open(io.BytesIO(contents)).convert("RGB")
-        binary_mask, masked, original_crop, tight_box = segment_garment(image, box, device, loaders)
+        import base64
+        import io
+        from PIL import Image
+        import numpy as np
         
-        # Save cropped masked garment as PNG and base64-encode
-        buffered = io.BytesIO()
-        masked.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        return {"mask_image_base64": img_str}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# 5. POST /digitize/normalize - standardizes the garment image
-@app.post("/digitize/normalize")
-async def step_normalize(file: UploadFile = File(...)):
-    try:
-        contents = await file.read()
-        image = Image.open(io.BytesIO(contents)).convert("RGBA")
-        normalized, provider = normalize_garment(image, "garment")
+        from pipeline.florence_attrs import extract_attributes
+        from pipeline.fashion_clip import encode_image
+        from pipeline.orchestrator import map_to_try_on_category, map_to_try_on_subcategory, rgb_to_lab
+        from pipeline.config import GARMENTS_DIR
         
-        buffered = io.BytesIO()
-        normalized.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        return {"image_base64": img_str, "provider": provider}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# 6. POST /digitize/attributes - Florence-2 attribute extraction
-@app.post("/digitize/attributes")
-async def step_attributes(file: UploadFile = File(...), label: str = "shirt"):
-    try:
-        contents = await file.read()
-        image = Image.open(io.BytesIO(contents)).convert("RGB")
-        attrs = extract_attributes(image, label, device, loaders)
-        return attrs
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# 7. POST /digitize/embed - FashionCLIP embedding
-@app.post("/digitize/embed")
-async def step_embed(file: UploadFile = File(...)):
-    try:
-        contents = await file.read()
-        image = Image.open(io.BytesIO(contents)).convert("RGB")
+        # Decode base64 image
+        img_bytes = base64.b64decode(payload.image_base64)
+        image = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
+        
+        # 1. Run Florence-2 attribute extraction
+        device = loaders.device
+        attrs = extract_attributes(image.convert("RGB"), payload.label, device, loaders)
+        
+        # 2. Run FashionCLIP embedding
         embedding = encode_image(image, device)
-        return {"dimensions": len(embedding), "embedding": embedding}
+        
+        # 3. Create file assets on disk
+        g_id = str(uuid.uuid4())
+        g_dir = os.path.join(GARMENTS_DIR, g_id)
+        os.makedirs(g_dir, exist_ok=True)
+        
+        normalized_path = os.path.join(g_dir, "normalized.png")
+        image.save(normalized_path, "PNG")
+        
+        # Legacy compat white_bg.png
+        white_bg_path = os.path.join(g_dir, "white_bg.png")
+        image.save(white_bg_path, "PNG")
+        
+        # Save thumbnail
+        thumb = image.copy()
+        thumb.thumbnail((256, 256), Image.Resampling.LANCZOS)
+        canvas = Image.new("RGB", (256, 256), (255, 255, 255))
+        canvas.paste(thumb, ((256 - thumb.width) // 2, (256 - thumb.height) // 2))
+        canvas.save(os.path.join(g_dir, "thumbnail.jpg"), "JPEG", quality=90)
+        
+        # Save actual crop if provided
+        if payload.crop_base64:
+            try:
+                crop_bytes = base64.b64decode(payload.crop_base64)
+                crop_img = Image.open(io.BytesIO(crop_bytes)).convert("RGBA")
+                crop_img.save(os.path.join(g_dir, "crop.png"), "PNG")
+            except Exception as e:
+                print(f"Error saving crop.png: {str(e)}")
+                
+        # Copy original source image if available in temp storage
+        if payload.source_image_id:
+            try:
+                from pipeline.config import STORAGE_DIR
+                temp_path = os.path.join(STORAGE_DIR, "temp_sources", f"{payload.source_image_id}.jpg")
+                if os.path.exists(temp_path):
+                    import shutil
+                    shutil.copy(temp_path, os.path.join(g_dir, "source_image.jpg"))
+            except Exception as e:
+                print(f"Error copying source_image.jpg: {str(e)}")
+        
+        # Average color extraction
+        avg_rgb = [128, 128, 128]
+        img_np = np.array(image)
+        if img_np.size > 0:
+            mask = img_np[:, :, 3] > 10 if img_np.shape[2] == 4 else np.ones(img_np.shape[:2], dtype=bool)
+            if mask.any():
+                avg_rgb = [int(c) for c in img_np[mask].mean(axis=0)[:3]]
+        lab_color = rgb_to_lab(avg_rgb)
+        
+        category = attrs["category"]
+        subcategory = attrs["subcategory"]
+        detected_colors = attrs.get("colors", ["gray"])
+        pattern = attrs["pattern"]
+        material = attrs["material"]
+        fit = attrs["fit"]
+        
+        # Map try_on categories/subcategories
+        try_on_cat = map_to_try_on_category(category)
+        try_on_subcat = map_to_try_on_subcategory(subcategory)
+        
+        metadata_dict = {
+            "garment_id": g_id,
+            "user_id": None,
+            "category": try_on_cat,
+            "subcategory": try_on_subcat,
+            "color": detected_colors,
+            "pattern": pattern,
+            "clip_embedding": embedding,
+            "bbox": [0, 0, image.width, image.height],
+            "source_image_id": payload.source_image_id,
+            "extraction_confidence": 1.0,
+            "normalization_provider": "gpt-image",
+            "florence_caption": attrs.get("florence_caption", ""),
+        }
+        
+        # Persist to database
+        db_manager.save_garment(metadata_dict)
+        with open(os.path.join(g_dir, "metadata.json"), "w") as f:
+            json.dump(metadata_dict, f, indent=2)
+            
+        # Compile response
+        seasons = (
+            ["Spring", "Summer", "Autumn"]
+            if category != "Outerwear"
+            else ["Autumn", "Winter", "Spring"]
+        )
+        formality_map = {
+            "T-Shirt": 0.1, "Canvas Sneakers": 0.1, "Selvedge Jeans": 0.25,
+            "Oxford Shirt": 0.6, "Pleated Trousers": 0.7, "Leather Loafers": 0.75,
+            "Linen Blazer": 0.75, "Silk Blouse": 0.8, "Trench Coat": 0.85,
+        }
+        formality_score = formality_map.get(subcategory, 0.5)
+        
+        return {
+            "garment_id": g_id,
+            "image_base64": payload.image_base64,
+            "straightened_image_base64": payload.image_base64,
+            "attributes": {
+                "category": category,
+                "subcategory": subcategory,
+                "colorName": attrs["colorName"],
+                "labColor": lab_color,
+                "material": material,
+                "pattern": pattern,
+                "fit": fit,
+                "seasons": seasons,
+                "formalityScore": formality_score,
+                "silhouette": subcategory.split()[-1] if subcategory else "clothing",
+                "brand": payload.brand,
+                "price": payload.price,
+                "embedding": embedding.tolist() if hasattr(embedding, "tolist") else list(embedding),
+                "florenceCaption": attrs.get("florence_caption", ""),
+                "normalizationProvider": "gpt-image",
+            }
+        }
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 # 8. GET /garments - List all garments

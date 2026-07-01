@@ -83,7 +83,7 @@ actual suspend fun runImageExtraction(
 ): List<Garment>? {
     onProgress("UPLOAD", 0.1f, "Uploading and validating image...")
     kotlinx.coroutines.delay(400)
-    onProgress("GROUNDED_SAM2", 0.25f, "Grounded-SAM-2: Detection + segmentation...")
+    onProgress("GROUNDED_SAM2", 0.25f, "YOLO-World + SAM: Detection + segmentation...")
     kotlinx.coroutines.delay(400)
     onProgress("QUALITY_VALIDATION", 0.4f, "Quality validation...")
     kotlinx.coroutines.delay(400)
@@ -163,3 +163,26 @@ actual suspend fun testBackendConnection(baseUrl: String): Boolean {
 
 @JsFun("(url, callback) => fetch(url).then(r => callback(r.status >= 200 && r.status <= 399 || r.status === 404)).catch(() => callback(false))")
 private external fun backendPing(url: String, callback: (Boolean) -> Unit)
+
+actual suspend fun runGarmentDetection(path: String): List<com.closetos.app.data.model.DetectedBox>? {
+    return listOf(
+        com.closetos.app.data.model.DetectedBox(
+            bbox = listOf(50, 50, 200, 200),
+            label = "TopWear",
+            score = 0.9f,
+            cropBase64 = ""
+        )
+    )
+}
+
+actual suspend fun normalizeAndFinalizeGarment(
+    cropBase64: String,
+    label: String,
+    sourceImageId: String?
+): Garment? {
+    return null
+}
+
+actual fun decodeBase64ToBitmap(base64: String): ImageBitmap? {
+    return null
+}
