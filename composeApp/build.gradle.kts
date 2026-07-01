@@ -93,16 +93,21 @@ val wasmJsCopySkiko = tasks.register("wasmJsCopySkiko") {
                 val mjsFile = dir.resolve("skiko.mjs")
                 val wasmFile = dir.resolve("skiko.wasm")
                 if (mjsFile.exists()) {
-                    println("[DEBUG] Copying skiko.mjs to ${targetDir.absolutePath}")
                     mjsFile.copyTo(targetDir.resolve("skiko.mjs"), overwrite = true)
                 }
                 if (wasmFile.exists()) {
-                    println("[DEBUG] Copying skiko.wasm to ${targetDir.absolutePath}")
                     wasmFile.copyTo(targetDir.resolve("skiko.wasm"), overwrite = true)
                 }
             }
         }
+        if (!targetDir.resolve("skiko.mjs").exists()) {
+            error("skiko.mjs not found after copy — run a full Gradle sync/build first")
+        }
     }
+}
+
+tasks.named("compileKotlinWasmJs").configure {
+    finalizedBy(wasmJsCopySkiko)
 }
 
 tasks.configureEach {

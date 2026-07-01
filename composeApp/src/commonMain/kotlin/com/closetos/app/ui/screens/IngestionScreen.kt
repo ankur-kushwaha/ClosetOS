@@ -35,7 +35,6 @@ import com.closetos.app.ui.components.SectionHeader
 import com.closetos.app.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.Dispatchers
 
 @Composable
 fun IngestionScreen(
@@ -53,7 +52,7 @@ fun IngestionScreen(
 
     var showServerConfig by remember { mutableStateOf(false) }
     var serverIpInput by remember {
-        mutableStateOf(PlatformStorage.loadString("backend_ip") ?: "http://10.0.2.2:8000")
+        mutableStateOf(PlatformStorage.loadString("backend_ip") ?: defaultBackendUrl())
     }
     var connectionStatus by remember { mutableStateOf("Unknown") } // "Checking", "Connected", "Failed", "Unknown"
 
@@ -145,23 +144,11 @@ fun IngestionScreen(
                         TextButton(
                             onClick = {
                                 connectionStatus = "Checking"
-                                scope.launch(Dispatchers.IO) {
-                                    try {
-                                        val testUrl = if (serverIpInput.startsWith("http://") || serverIpInput.startsWith("https://")) {
-                                            serverIpInput
-                                        } else {
-                                            "http://$serverIpInput"
-                                        }
-                                        val url = java.net.URL(testUrl.trimEnd('/') + "/")
-                                        val conn = url.openConnection() as java.net.HttpURLConnection
-                                        conn.connectTimeout = 3000
-                                        conn.readTimeout = 3000
-                                        conn.requestMethod = "GET"
-                                        val code = conn.responseCode
-                                        connectionStatus = if (code in 200..399 || code == 404) "Connected" else "Failed"
-                                        conn.disconnect()
-                                    } catch (e: Exception) {
-                                        connectionStatus = "Failed"
+                                scope.launch {
+                                    connectionStatus = if (testBackendConnection(serverIpInput)) {
+                                        "Connected"
+                                    } else {
+                                        "Failed"
                                     }
                                 }
                             }
@@ -275,12 +262,14 @@ private suspend fun simulateGarmentPipeline(item: IngestionItem) {
     val backendGarments = runImageExtraction(filename) { statusName, progress, label ->
         // Map server steps to UI statuses
         val uiStatus = when (statusName) {
-            "PRE_FLIGHT" -> IngestionStatus.PRE_FLIGHT
-            "GARMENT_DETECTION" -> IngestionStatus.GROUNDING_DINO
-            "SEGMENTATION", "MASK_CLEANUP" -> IngestionStatus.SAM2
-            "BACKGROUND_REMOVAL", "WHITE_BG_COMPOSITE", "ORIGINAL_CROP", "THUMBNAIL" -> IngestionStatus.CROP_GARMENT
-            "METADATA_EXTRACTION" -> IngestionStatus.FASHION_CLIP
-            "HIRES_UPSCALE" -> IngestionStatus.FLORENCE_2
+            "UPLOAD", "PRE_FLIGHT" -> IngestionStatus.PRE_FLIGHT
+            "GROUNDED_SAM2", "GARMENT_DETECTION", "SEGMENTATION", "MASK_CLEANUP" -> IngestionStatus.GROUNDING_DINO
+            "QUALITY_VALIDATION" -> IngestionStatus.QUALITY_VALIDATION
+            "NORMALIZATION", "BACKGROUND_REMOVAL", "WHITE_BG_COMPOSITE" -> IngestionStatus.NORMALIZATION
+            "ORIGINAL_CROP", "THUMBNAIL" -> IngestionStatus.CROP_GARMENT
+            "FLORENCE_2", "METADATA_EXTRACTION" -> IngestionStatus.FLORENCE_2
+            "FASHION_CLIP" -> IngestionStatus.FASHION_CLIP
+            "DATABASE_PERSIST", "HIRES_UPSCALE" -> IngestionStatus.FASHION_CLIP
             else -> IngestionStatus.PRE_FLIGHT
         }
         

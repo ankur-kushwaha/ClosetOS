@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WardrobeOS API Tester</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #1a1d27;
+      --border: #2a2f3d;
+      --text: #e8eaef;
+      --muted: #8b93a7;
+      --accent: #c9a227;
+      --accent-dim: #9a7b1a;
+      --ok: #3ecf8e;
+      --err: #f07178;
+      --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, #151822, var(--bg));
+    }
+    header h1 { margin: 0 0 0.25rem; font-size: 1.35rem; font-weight: 600; }
+    header p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+    .layout {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      min-height: calc(100vh - 80px);
+    }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+    nav {
+      border-right: 1px solid var(--border);
+      padding: 1rem;
+      background: var(--panel);
+    }
+    nav button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      margin-bottom: 0.35rem;
+      padding: 0.55rem 0.75rem;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    nav button:hover { background: #222633; }
+    nav button.active {
+      border-color: var(--accent-dim);
+      background: #252a38;
+      color: var(--accent);
+    }
+    main { padding: 1.25rem 1.5rem; overflow: auto; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1rem;
+    }
+    .card h2 { margin: 0 0 0.75rem; font-size: 1.05rem; }
+    .card p.hint { margin: 0 0 1rem; color: var(--muted); font-size: 0.85rem; }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.35rem; }
+    input[type="text"], input[type="number"], textarea {
+      width: 100%;
+      padding: 0.5rem 0.65rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #12151e;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.82rem;
+    }
+    textarea { min-height: 72px; resize: vertical; }
+    .row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: end; margin-bottom: 0.75rem; }
+    .row > * { flex: 1; min-width: 140px; }
+    .btn {
+      padding: 0.55rem 1rem;
+      border: none;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #111;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.88rem;
+    }
+    .btn:hover { filter: brightness(1.08); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn.secondary {
+      background: #2a3040;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .status-pill {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .status-pill.ok { background: #1a3d2e; color: var(--ok); }
+    .status-pill.err { background: #3d1a1f; color: var(--err); }
+    .status-pill.wait { background: #2a2a1a; color: var(--accent); }
+    pre.output {
+      margin: 0.75rem 0 0;
+      padding: 0.75rem;
+      background: #0c0e14;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: auto;
+      max-height: 320px;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .images {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 0.75rem;
+      margin-top: 0.75rem;
+    }
+    .images figure {
+      margin: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+    .images img { width: 100%; display: block; aspect-ratio: 1; object-fit: contain; }
+    .images figcaption {
+      padding: 0.35rem 0.5rem;
+      font-size: 0.72rem;
+      background: var(--panel);
+      color: var(--muted);
+      text-align: center;
+    }
+    .steps { list-style: none; padding: 0; margin: 0.75rem 0 0; }
+    .steps li {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.35rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.82rem;
+    }
+    .steps li:last-child { border-bottom: none; }
+    .hidden { display: none !important; }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+      font-size: 0.82rem;
+    }
+    .meta-grid div {
+      background: #12151e;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem 0.65rem;
+    }
+    .meta-grid span { display: block; color: var(--muted); font-size: 0.72rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>WardrobeOS API Tester</h1>
+    <p>Upload → Grounded-SAM-2 → Quality → Normalization → Florence-2 → FashionCLIP → pgvector</p>
+  </header>
+
+  <div class="layout">
+    <nav id="nav">
+      <button type="button" class="active" data-panel="health">Server health</button>
+      <button type="button" data-panel="pipeline">Full pipeline</button>
+      <button type="button" data-panel="detect">Detect garments</button>
+      <button type="button" data-panel="segment">Segment</button>
+      <button type="button" data-panel="normalize">Normalize</button>
+      <button type="button" data-panel="attributes">Florence-2 attributes</button>
+      <button type="button" data-panel="embed">FashionCLIP embed</button>
+      <button type="button" data-panel="garments">List garments</button>
+      <button type="button" data-panel="search">Similarity search</button>
+    </nav>
+
+    <main>
+      <!-- Health -->
+      <section class="card panel" id="panel-health">
+        <h2>Server health</h2>
+        <p class="hint">GET / — device, detection model, normalization provider, database type.</p>
+        <button type="button" class="btn" id="btn-health">Fetch status</button>
+        <div class="meta-grid" id="health-meta"></div>
+        <pre class="output hidden" id="out-health"></pre>
+      </section>
+
+      <!-- Full pipeline -->
+      <section class="card panel hidden" id="panel-pipeline">
+        <h2>Full digitization pipeline</h2>
+        <p class="hint">POST /digitize/start then poll GET /digitize/jobs/{job_id}. Supports multiple garments per image.</p>
+        <div class="row">
+          <div>
+            <label>Image</label>
+            <input type="file" id="file-pipeline" accept="image/*" />
+          </div>
+        </div>
+        <button type="button" class="btn" id="btn-pipeline">Run pipeline</button>
+        <button type="button" class="btn secondary hidden" id="btn-pipeline-stop">Stop polling</button>
+        <p style="margin-top:0.75rem">
+          Status: <span class="status-pill wait" id="pipeline-status">idle</span>
+          <span id="pipeline-progress" style="color:var(--muted);font-size:0.85rem;margin-left:0.5rem"></span>
+        </p>
+        <ul class="steps" id="pipeline-steps"></ul>
+        <div class="images" id="pipeline-images"></div>
+        <pre class="output hidden" id="out-pipeline"></pre>
+      </section>
+
+      <!-- Detect -->
+      <section class="card panel hidden" id="panel-detect">
+        <h2>Detect garments</h2>
+        <p class="hint">POST /digitize/detect — Grounding DINO bounding boxes.</p>
+        <label>Image</label>
+        <input type="file" id="file-detect" accept="image/*" />
+        <div style="margin-top:0.75rem">
+          <button type="button" class="btn" id="btn-detect">Detect</button>
+        </div>
+        <canvas id="detect-canvas" style="max-width:100%;margin-top:0.75rem;border:1px solid var(--border);border-radius:8px;display:none"></canvas>
+        <pre class="output hidden" id="out-detect"></pre>
+      </section>
+
+      <!-- Segment -->
+      <section class="card panel hidden" id="panel-segment">
+        <h2>Segment garment</h2>
+        <p class="hint">POST /digitize/segment — SAM mask for a bbox [x1,y1,x2,y2].</p>
+        <div class="row">
+          <div><label>Image</label><input type="file" id="file-segment" accept="image/*" /></div>
+          <div><label>Bbox JSON</label><input type="text" id="bbox-segment" value="[50,50,400,500]" /></div>
+        </div>
+        <button type="button" class="btn" id="btn-segment">Segment</button>
+        <div class="images" id="segment-images"></div>
+        <pre class="output hidden" id="out-segment"></pre>
+      </section>
+
+      <!-- Normalize -->
+      <section class="card panel hidden" id="panel-normalize">
+        <h2>Normalize garment</h2>
+        <p class="hint">POST /digitize/normalize — GPT Image / FLUX Kontext / white-bg fallback.</p>
+        <label>Image (masked or crop)</label>
+        <input type="file" id="file-normalize" accept="image/*" />
+        <div style="margin-top:0.75rem"><button type="button" class="btn" id="btn-normalize">Normalize</button></div>
+        <div class="images" id="normalize-images"></div>
+        <pre class="output hidden" id="out-normalize"></pre>
+      </section>
+
+      <!-- Attributes -->
+      <section class="card panel hidden" id="panel-attributes">
+        <h2>Florence-2 attributes</h2>
+        <p class="hint">POST /digitize/attributes — category, color, material, pattern from normalized image.</p>
+        <div class="row">
+          <div><label>Image</label><input type="file" id="file-attributes" accept="image/*" /></div>
+          <div><label>Detection label hint</label><input type="text" id="label-attributes" value="shirt" /></div>
+        </div>
+        <button type="button" class="btn" id="btn-attributes">Extract attributes</button>
+        <pre class="output hidden" id="out-attributes"></pre>
+      </section>
+
+      <!-- Embed -->
+      <section class="card panel hidden" id="panel-embed">
+        <h2>FashionCLIP embedding</h2>
+        <p class="hint">POST /digitize/embed — 512-d vector.</p>
+        <label>Image</label>
+        <input type="file" id="file-embed" accept="image/*" />
+        <div style="margin-top:0.75rem"><button type="button" class="btn" id="btn-embed">Generate embedding</button></div>
+        <pre class="output hidden" id="out-embed"></pre>
+      </section>
+
+      <!-- Garments -->
+      <section class="card panel hidden" id="panel-garments">
+        <h2>Persisted garments</h2>
+        <p class="hint">GET /garments and GET /garments/{id} — PostgreSQL + pgvector.</p>
+        <div class="row">
+          <button type="button" class="btn" id="btn-garments-list">List all</button>
+          <div>
+            <label>Garment ID</label>
+            <input type="text" id="garment-id" placeholder="uuid" />
+          </div>
+          <button type="button" class="btn secondary" id="btn-garment-get">Get by ID</button>
+        </div>
+        <pre class="output hidden" id="out-garments"></pre>
+      </section>
+
+      <!-- Search -->
+      <section class="card panel hidden" id="panel-search">
+        <h2>Similarity search</h2>
+        <p class="hint">POST /garments/search — FashionCLIP cosine similarity against stored embeddings.</p>
+        <div class="row">
+          <div><label>Query image</label><input type="file" id="file-search" accept="image/*" /></div>
+          <div><label>Limit</label><input type="number" id="search-limit" value="5" min="1" max="20" /></div>
+        </div>
+        <button type="button" class="btn" id="btn-search">Search</button>
+        <pre class="output hidden" id="out-search"></pre>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const $ = (sel) => document.querySelector(sel);
+    const base = window.location.origin;
+
+    // Navigation
+    $("#nav").addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-panel]");
+      if (!btn) return;
+      document.querySelectorAll("#nav button").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      document.querySelectorAll(".panel").forEach((p) => p.classList.add("hidden"));
+      $(`#panel-${btn.dataset.panel}`).classList.remove("hidden");
+    });
+
+    function showOutput(id, data, isError = false) {
+      const el = $(id);
+      el.classList.remove("hidden");
+      el.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+      el.style.borderColor = isError ? "var(--err)" : "var(--border)";
+    }
+
+    function imgFigure(src, caption) {
+      const fig = document.createElement("figure");
+      fig.innerHTML = `<img src="${src}" alt="${caption}" /><figcaption>${caption}</figcaption>`;
+      return fig;
+    }
+
+    async function postFile(path, file, extra = {}) {
+      const fd = new FormData();
+      fd.append("file", file);
+      Object.entries(extra).forEach(([k, v]) => fd.append(k, v));
+      const res = await fetch(`${base}${path}`, { method: "POST", body: fd });
+      const text = await res.text();
+      let json;
+      try { json = JSON.parse(text); } catch { json = { raw: text }; }
+      if (!res.ok) throw new Error(json.detail || json.raw || res.statusText);
+      return json;
+    }
+
+    // Health
+    $("#btn-health").onclick = async () => {
+      try {
+        const res = await fetch(`${base}/`);
+        const data = await res.json();
+        const grid = $("#health-meta");
+        grid.innerHTML = Object.entries(data)
+          .filter(([k]) => k !== "pipeline")
+          .map(([k, v]) => `<div><span>${k}</span>${Array.isArray(v) ? v.join(", ") : v}</div>`)
+          .join("");
+        showOutput("#out-health", data);
+      } catch (e) {
+        showOutput("#out-health", e.message, true);
+      }
+    };
+
+    // Pipeline
+    let pollTimer = null;
+    $("#btn-pipeline-stop").onclick = () => {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = null;
+      $("#btn-pipeline-stop").classList.add("hidden");
+    };
+
+    $("#btn-pipeline").onclick = async () => {
+      const file = $("#file-pipeline").files[0];
+      if (!file) return alert("Choose an image");
+      $("#btn-pipeline").disabled = true;
+      $("#pipeline-images").innerHTML = "";
+      $("#pipeline-steps").innerHTML = "";
+      $("#pipeline-status").textContent = "starting";
+      $("#pipeline-status").className = "status-pill wait";
+      try {
+        const start = await postFile("/digitize/start", file);
+        const jobId = start.job_id;
+        $("#pipeline-progress").textContent = `job: ${jobId}`;
+
+        const poll = async () => {
+          const res = await fetch(`${base}/digitize/jobs/${jobId}`);
+          const job = await res.json();
+          $("#pipeline-status").textContent = job.status;
+          $("#pipeline-status").className = "status-pill " + (job.status === "completed" ? "ok" : job.status === "failed" ? "err" : "wait");
+          $("#pipeline-progress").textContent = `${Math.round((job.progress || 0) * 100)}% — ${job.current_step || ""}`;
+
+          $("#pipeline-steps").innerHTML = (job.steps || []).map((s) =>
+            `<li><span>${s.name}</span><span style="color:var(--muted)">${s.status} — ${s.label || ""}</span></li>`
+          ).join("");
+
+          if (job.status === "completed") {
+            clearInterval(pollTimer);
+            pollTimer = null;
+            $("#btn-pipeline-stop").classList.add("hidden");
+            $("#btn-pipeline").disabled = false;
+            const gallery = $("#pipeline-images");
+            gallery.innerHTML = "";
+            (job.garments || []).forEach((g, i) => {
+              gallery.appendChild(imgFigure(`data:image/png;base64,${g.image_base64}`, `Masked ${i + 1}`));
+              gallery.appendChild(imgFigure(`data:image/png;base64,${g.straightened_image_base64}`, `Normalized ${i + 1}`));
+            });
+            showOutput("#out-pipeline", job);
+          } else if (job.status === "failed") {
+            clearInterval(pollTimer);
+            pollTimer = null;
+            $("#btn-pipeline-stop").classList.add("hidden");
+            $("#btn-pipeline").disabled = false;
+            showOutput("#out-pipeline", job.error || job, true);
+          }
+        };
+
+        await poll();
+        pollTimer = setInterval(poll, 1500);
+        $("#btn-pipeline-stop").classList.remove("hidden");
+      } catch (e) {
+        $("#btn-pipeline").disabled = false;
+        showOutput("#out-pipeline", e.message, true);
+      }
+    };
+
+    // Detect + canvas overlay
+    $("#btn-detect").onclick = async () => {
+      const file = $("#file-detect").files[0];
+      if (!file) return alert("Choose an image");
+      try {
+        const data = await postFile("/digitize/detect", file);
+        showOutput("#out-detect", data);
+
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+          const canvas = $("#detect-canvas");
+          canvas.style.display = "block";
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0);
+          const colors = ["#c9a227", "#3ecf8e", "#6eb5ff", "#f07178", "#c678dd"];
+          (data.bboxes || []).forEach((box, i) => {
+            const [x1, y1, x2, y2] = box;
+            ctx.strokeStyle = colors[i % colors.length];
+            ctx.lineWidth = 3;
+            ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+            ctx.fillStyle = colors[i % colors.length];
+            ctx.font = "14px sans-serif";
+            ctx.fillText((data.labels || [])[i] || "item", x1 + 4, y1 + 18);
+          });
+          URL.revokeObjectURL(url);
+        };
+        img.src = url;
+      } catch (e) {
+        showOutput("#out-detect", e.message, true);
+      }
+    };
+
+    // Segment
+    $("#btn-segment").onclick = async () => {
+      const file = $("#file-segment").files[0];
+      if (!file) return alert("Choose an image");
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const bbox = $("#bbox-segment").value;
+        const res = await fetch(`${base}/digitize/segment?bbox=${encodeURIComponent(bbox)}`, { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || res.statusText);
+        $("#segment-images").innerHTML = "";
+        $("#segment-images").appendChild(imgFigure(`data:image/png;base64,${data.mask_image_base64}`, "Segmented"));
+        showOutput("#out-segment", data);
+      } catch (e) {
+        showOutput("#out-segment", e.message, true);
+      }
+    };
+
+    // Normalize
+    $("#btn-normalize").onclick = async () => {
+      const file = $("#file-normalize").files[0];
+      if (!file) return alert("Choose an image");
+      try {
+        const data = await postFile("/digitize/normalize", file);
+        $("#normalize-images").innerHTML = "";
+        $("#normalize-images").appendChild(imgFigure(`data:image/png;base64,${data.image_base64}`, data.provider || "normalized"));
+        showOutput("#out-normalize", data);
+      } catch (e) {
+        showOutput("#out-normalize", e.message, true);
+      }
+    };
+
+    // Attributes
+    $("#btn-attributes").onclick = async () => {
+      const file = $("#file-attributes").files[0];
+      if (!file) return alert("Choose an image");
+      try {
+        const label = $("#label-attributes").value || "shirt";
+        const res = await fetch(`${base}/digitize/attributes?label=${encodeURIComponent(label)}`, {
+          method: "POST",
+          body: (() => { const fd = new FormData(); fd.append("file", file); return fd; })(),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || res.statusText);
+        showOutput("#out-attributes", data);
+      } catch (e) {
+        showOutput("#out-attributes", e.message, true);
+      }
+    };
+
+    // Embed
+    $("#btn-embed").onclick = async () => {
+      const file = $("#file-embed").files[0];
+      if (!file) return alert("Choose an image");
+      try {
+        const data = await postFile("/digitize/embed", file);
+        const preview = { dimensions: data.dimensions, sample: data.embedding?.slice(0, 8), embedding_length: data.embedding?.length };
+        showOutput("#out-embed", preview);
+      } catch (e) {
+        showOutput("#out-embed", e.message, true);
+      }
+    };
+
+    // Garments
+    $("#btn-garments-list").onclick = async () => {
+      try {
+        const res = await fetch(`${base}/garments`);
+        const data = await res.json();
+        const trimmed = {
+          count: data.garments?.length || 0,
+          garments: (data.garments || []).map((g) => ({
+            garment_id: g.garment_id,
+            category: g.category,
+            subcategory: g.subcategory,
+            color: g.color,
+            pattern: g.pattern,
+            extraction_confidence: g.extraction_confidence,
+          })),
+        };
+        showOutput("#out-garments", trimmed);
+      } catch (e) {
+        showOutput("#out-garments", e.message, true);
+      }
+    };
+
+    $("#btn-garment-get").onclick = async () => {
+      const id = $("#garment-id").value.trim();
+      if (!id) return alert("Enter garment ID");
+      try {
+        const res = await fetch(`${base}/garments/${id}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || res.statusText);
+        const preview = { ...data, clip_embedding: `[${data.clip_embedding?.length || 0} dims]` };
+        showOutput("#out-garments", preview);
+      } catch (e) {
+        showOutput("#out-garments", e.message, true);
+      }
+    };
+
+    // Search
+    $("#btn-search").onclick = async () => {
+      const file = $("#file-search").files[0];
+      if (!file) return alert("Choose a query image");
+      try {
+        const limit = $("#search-limit").value || 5;
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch(`${base}/garments/search?limit=${limit}`, { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || res.statusText);
+        const preview = {
+          results: (data.results || []).map((r) => ({
+            garment_id: r.garment_id,
+            category: r.category,
+            subcategory: r.subcategory,
+            color: r.color,
+            similarity_score: r.similarity_score,
+          })),
+        };
+        showOutput("#out-search", preview);
+      } catch (e) {
+        showOutput("#out-search", e.message, true);
+      }
+    };
+
+    // Auto-load health on open
+    $("#btn-health").click();
+  </script>
+</body>
+</html>

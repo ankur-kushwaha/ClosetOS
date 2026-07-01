@@ -502,4 +502,28 @@ actual suspend fun fetchWeatherTemp(): Pair<Float, String> {
     }
 }
 
+actual fun defaultBackendUrl(): String = "http://10.0.2.2:8000"
+
 actual fun getEpochTimeMillis(): Long = System.currentTimeMillis()
+
+actual suspend fun testBackendConnection(baseUrl: String): Boolean {
+    return kotlinx.coroutines.withContext(Dispatchers.IO) {
+        try {
+            val testUrl = if (baseUrl.startsWith("http://") || baseUrl.startsWith("https://")) {
+                baseUrl
+            } else {
+                "http://$baseUrl"
+            }
+            val url = java.net.URL(testUrl.trimEnd('/') + "/")
+            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 3000
+            conn.readTimeout = 3000
+            conn.requestMethod = "GET"
+            val code = conn.responseCode
+            conn.disconnect()
+            code in 200..399 || code == 404
+        } catch (e: Exception) {
+            false
+        }
+    }
+}

@@ -29,3 +29,7 @@ expect suspend fun fetchWeatherTemp(): Pair<Float, String>
 
 expect fun getEpochTimeMillis(): Long
 
+expect suspend fun testBackendConnection(baseUrl: String): Boolean
+
+expect fun defaultBackendUrl(): String
+

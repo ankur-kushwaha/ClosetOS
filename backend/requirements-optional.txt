@@ -1,0 +1,4 @@
+# Optional extras — not required for the core digitization pipeline.
+# realesrgan pulls in basicsr, which often fails to build on Python 3.9/macOS.
+# Hi-res upscaling falls back to PIL Lanczos when this is not installed.
+realesrgan

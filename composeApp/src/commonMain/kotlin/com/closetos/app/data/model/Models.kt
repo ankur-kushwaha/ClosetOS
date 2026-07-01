@@ -101,6 +101,8 @@ enum class IngestionStatus {
     PRE_FLIGHT,
     GROUNDING_DINO,
     SAM2,
+    QUALITY_VALIDATION,
+    NORMALIZATION,
     CROP_GARMENT,
     FASHION_CLIP,
     FLORENCE_2,

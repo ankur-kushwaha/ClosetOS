@@ -4,6 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.ImageBitmap
 import com.closetos.app.data.model.Garment
 import kotlinx.browser.window
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 import kotlin.random.Random
 
 actual object PlatformStorage {
@@ -79,17 +81,19 @@ actual suspend fun runImageExtraction(
     path: String,
     onProgress: (status: String, progress: Float, label: String) -> Unit
 ): List<Garment>? {
-    onProgress("PRE_FLIGHT", 0.1f, "Pre-flight verification...")
+    onProgress("UPLOAD", 0.1f, "Uploading and validating image...")
     kotlinx.coroutines.delay(400)
-    onProgress("GROUNDING_DINO", 0.3f, "Florence-2: Running garment detection...")
+    onProgress("GROUNDED_SAM2", 0.25f, "Grounded-SAM-2: Detection + segmentation...")
     kotlinx.coroutines.delay(400)
-    onProgress("SAM2", 0.5f, "SAM: Segmenting image regions...")
+    onProgress("QUALITY_VALIDATION", 0.4f, "Quality validation...")
     kotlinx.coroutines.delay(400)
-    onProgress("CROP_GARMENT", 0.7f, "Rembg: Removing background edges...")
+    onProgress("NORMALIZATION", 0.55f, "Normalization (GPT Image / FLUX Kontext)...")
     kotlinx.coroutines.delay(400)
-    onProgress("FASHION_CLIP", 0.85f, "FashionCLIP: Attribute zero-shot tagging...")
+    onProgress("FLORENCE_2", 0.7f, "Florence-2: Attribute extraction...")
     kotlinx.coroutines.delay(400)
-    onProgress("FLORENCE_2", 0.95f, "RealESRGAN: Launching async upscaler...")
+    onProgress("FASHION_CLIP", 0.85f, "FashionCLIP: Generating embeddings...")
+    kotlinx.coroutines.delay(400)
+    onProgress("DATABASE_PERSIST", 0.95f, "PostgreSQL + pgvector: Persisting garment...")
     kotlinx.coroutines.delay(400)
     
     val template = garmentTemplates.firstOrNull {
@@ -138,8 +142,24 @@ actual suspend fun fetchWeatherTemp(): Pair<Float, String> {
     return Pair(72f, "Clear & Sunny")
 }
 
+actual fun defaultBackendUrl(): String = "http://127.0.0.1:8000"
+
 private fun jsDateNow(): Double = js("Date.now()")
 
 actual fun getEpochTimeMillis(): Long {
     return jsDateNow().toLong()
 }
+
+actual suspend fun testBackendConnection(baseUrl: String): Boolean {
+    val testUrl = if (baseUrl.startsWith("http://") || baseUrl.startsWith("https://")) {
+        baseUrl.trimEnd('/') + "/"
+    } else {
+        "http://${baseUrl.trimEnd('/')}/"
+    }
+    return suspendCoroutine { cont ->
+        backendPing(testUrl) { ok -> cont.resume(ok) }
+    }
+}
+
+@JsFun("(url, callback) => fetch(url).then(r => callback(r.status >= 200 && r.status <= 399 || r.status === 404)).catch(() => callback(false))")
+private external fun backendPing(url: String, callback: (Boolean) -> Unit)
