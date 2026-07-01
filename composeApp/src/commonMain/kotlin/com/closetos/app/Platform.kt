@@ -31,7 +31,28 @@ expect suspend fun runImageExtraction(
     onProgress: (status: String, progress: Float, label: String) -> Unit
 ): List<Garment>?
 
-expect suspend fun fetchWeatherTemp(): Pair<Float, String>
+data class WeatherInfo(
+    val tempCelsius: Float,
+    val description: String,
+    val locationName: String
+)
+
+expect suspend fun fetchWeatherInfo(): WeatherInfo
+
+@Composable
+expect fun RequestLocationPermission(onResult: (granted: Boolean) -> Unit)
+
+fun describeWeatherCode(code: Int): String = when (code) {
+    0 -> "Clear & Sunny"
+    1, 2, 3 -> "Partly Cloudy"
+    45, 48 -> "Foggy Weather"
+    51, 53, 55 -> "Light Drizzle"
+    61, 63, 65 -> "Rainy Day"
+    71, 73, 75 -> "Snowy Day"
+    80, 81, 82 -> "Showers"
+    95, 96, 99 -> "Thunderstorms"
+    else -> "Muted Day"
+}
 
 expect fun getEpochTimeMillis(): Long
 

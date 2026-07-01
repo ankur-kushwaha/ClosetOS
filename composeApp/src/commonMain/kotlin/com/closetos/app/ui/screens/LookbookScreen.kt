@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.closetos.app.data.model.LookbookCollection
 import com.closetos.app.data.model.Outfit
 import com.closetos.app.data.repository.ClosetRepository
+import com.closetos.app.data.repository.NotificationCenter
 import com.closetos.app.*
 import com.closetos.app.ui.components.*
 import com.closetos.app.ui.theme.*
@@ -74,15 +75,26 @@ fun LookbookScreen() {
     }
 
     val outfits by ClosetRepository.lookbookOutfits.collectAsState()
+    val garments by ClosetRepository.garments.collectAsState()
+    var highlightOccasion by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(outfits.isEmpty()) {
-        if (outfits.isEmpty()) {
+    LaunchedEffect(outfits, garments) {
+        if (garments.isNotEmpty() && ClosetRepository.getRecommendedOutfits(1).isEmpty()) {
             ClosetRepository.seedLookbookData()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        NotificationCenter.pendingLookbookOccasion?.let { occasion ->
+            highlightOccasion = occasion
+            NotificationCenter.pendingLookbookOccasion = null
         }
     }
 
     when (val screen = current) {
         LookbookNav.Landing -> LookbookLanding(
+            highlightOccasion = highlightOccasion,
+            onDismissHighlight = { highlightOccasion = null },
             onSection = { type, title -> push(LookbookNav.Section(type, title)) },
             onCollection = { push(LookbookNav.Collection(it)) },
             onOutfit = { push(LookbookNav.OutfitDetail(it.id)) },
@@ -122,6 +134,8 @@ fun LookbookScreen() {
 
 @Composable
 private fun LookbookLanding(
+    highlightOccasion: String? = null,
+    onDismissHighlight: () -> Unit = {},
     onSection: (LookbookSection, String) -> Unit,
     onCollection: (LookbookCollection) -> Unit,
     onOutfit: (Outfit) -> Unit,
@@ -132,14 +146,15 @@ private fun LookbookLanding(
     var temperatureC by remember { mutableStateOf(24f) }
 
     LaunchedEffect(Unit) {
-        val weather = fetchWeatherTemp()
-        temperatureC = (weather.first - 32f) * 5f / 9f
+        val weather = fetchWeatherInfo()
+        temperatureC = weather.tempCelsius
     }
 
     val outfits by ClosetRepository.lookbookOutfits.collectAsState()
-    val recommended = remember(outfits) { ClosetRepository.getRecommendedOutfits(3) }
-    val recent = remember(outfits) { ClosetRepository.getRecentlyWornOutfits(4) }
-    val favorites = remember(outfits) { ClosetRepository.getFavoriteOutfits(4) }
+    val garments by ClosetRepository.garments.collectAsState()
+    val recommended = remember(outfits, garments) { ClosetRepository.getRecommendedOutfits(3) }
+    val recent = remember(outfits, garments) { ClosetRepository.getRecentlyWornOutfits(4) }
+    val favorites = remember(outfits, garments) { ClosetRepository.getFavoriteOutfits(4) }
     val weekOccasions = listOf("Office", "Weekend", "Dinner", "Travel")
     val featuredCollections = collections.take(6)
 
@@ -166,6 +181,35 @@ private fun LookbookLanding(
                 color = TextMuted,
                 modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
             )
+
+            highlightOccasion?.let { occasion ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(AccentGold.copy(alpha = 0.12f))
+                        .border(0.5.dp, GoldBorder, RoundedCornerShape(12.dp))
+                        .clickable(onClick = onDismissHighlight)
+                        .padding(12.dp)
+                ) {
+                    Column {
+                        Text(
+                            text = "✨ Newly unlocked",
+                            fontFamily = OutfitFont,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentGold
+                        )
+                        Text(
+                            text = "Showing your fresh $occasion",
+                            fontFamily = OutfitFont,
+                            fontSize = 13.sp,
+                            color = TextLight
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
         }
 
         LookbookSearchBar(query = "", onClick = onSearch)
@@ -229,7 +273,7 @@ private fun LookbookLanding(
             items(featuredCollections, key = { it.id }) { collection ->
                 CollectionPlaylistCard(
                     collection = collection,
-                    outfitCount = collection.outfitIds.size,
+                    outfitCount = ClosetRepository.getOutfitsForCollection(collection.id).size,
                     onClick = { onCollection(collection) }
                 )
             }
@@ -320,7 +364,8 @@ private fun LookbookSectionScreen(
     onBack: () -> Unit,
     onOutfit: (Outfit) -> Unit
 ) {
-  val outfits = remember(section, title) {
+  val garments by ClosetRepository.garments.collectAsState()
+  val outfits = remember(section, title, garments) {
         when (section) {
             LookbookSection.Recommended -> {
                 if (title in listOf("Office", "Weekend", "Dinner", "Travel")) {
@@ -369,7 +414,8 @@ private fun LookbookCollectionScreen(
     onBack: () -> Unit,
     onOutfit: (Outfit) -> Unit
 ) {
-    val outfits = remember(collection.id) { ClosetRepository.getOutfitsForCollection(collection.id) }
+    val garments by ClosetRepository.garments.collectAsState()
+    val outfits = remember(collection.id, garments) { ClosetRepository.getOutfitsForCollection(collection.id) }
 
     Column(
         modifier = Modifier
@@ -409,7 +455,8 @@ private fun LookbookSearchScreen(
     onOutfit: (Outfit) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
-    val results = remember(query) { ClosetRepository.searchOutfits(query) }
+    val garments by ClosetRepository.garments.collectAsState()
+    val results = remember(query, garments) { ClosetRepository.searchOutfits(query) }
 
     Column(
         modifier = Modifier
@@ -463,8 +510,8 @@ fun OutfitDetailScreen(
     var temperatureC by remember { mutableStateOf(liveOutfit.temperatureC) }
 
     LaunchedEffect(Unit) {
-        val weather = fetchWeatherTemp()
-        temperatureC = (weather.first - 32f) * 5f / 9f
+        val weather = fetchWeatherInfo()
+        temperatureC = weather.tempCelsius
     }
 
     Column(

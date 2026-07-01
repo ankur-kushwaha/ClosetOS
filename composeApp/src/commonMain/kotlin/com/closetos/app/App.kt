@@ -19,6 +19,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.closetos.app.data.repository.ClosetRepository
+import com.closetos.app.data.repository.NotificationCenter
+import com.closetos.app.ui.components.NotificationBell
+import com.closetos.app.ui.components.NotificationInboxSheet
+import com.closetos.app.ui.components.NotificationScheduleHost
+import com.closetos.app.ui.components.WardrobeEvolutionBanner
 import com.closetos.app.ui.screens.*
 import com.closetos.app.ui.theme.ClosetOSTheme
 import com.closetos.app.ui.theme.AccentGold
@@ -48,6 +53,28 @@ fun App() {
             mutableStateOf(PlatformStorage.loadString("has_completed_onboarding") == "true")
         }
         var activeRoute by remember { mutableStateOf(Screen.Ootd.route) }
+        var showNotificationInbox by remember { mutableStateOf(false) }
+
+        val activeBanner by NotificationCenter.activeBanner.collectAsState()
+        val allNotifications by NotificationCenter.notifications.collectAsState()
+        val unreadCount = remember(allNotifications) { NotificationCenter.unreadCount() }
+
+        NotificationScheduleHost()
+
+        fun handleNotificationAction(notification: com.closetos.app.data.model.AppNotification) {
+            NotificationCenter.markRead(notification.id)
+            NotificationCenter.dismissBanner()
+            notification.payload?.occasionUnlocks
+                ?.firstOrNull { it.count > 0 }
+                ?.label
+                ?.let { NotificationCenter.pendingLookbookOccasion = it }
+            when (notification.actionRoute) {
+                Screen.Ootd.route, "ootd" -> activeRoute = Screen.Ootd.route
+                Screen.Builder.route, "builder" -> activeRoute = Screen.Builder.route
+                else -> notification.actionRoute?.let { activeRoute = it }
+            }
+            showNotificationInbox = false
+        }
 
         ModalNavigationDrawer(
             drawerState = drawerState,
@@ -133,6 +160,39 @@ fun App() {
 
                         Button(
                             onClick = {
+                                val sample = ClosetRepository.garments.value.firstOrNull()
+                                if (sample != null) {
+                                    val before = ClosetRepository.garments.value
+                                    val fake = sample.copy(
+                                        id = com.closetos.app.data.model.generateUUID(),
+                                        subcategory = "Blazer",
+                                        colorName = "Navy"
+                                    )
+                                    ClosetRepository.garments.value.let { }
+                                    val after = before + fake
+                                    com.closetos.app.data.repository.ClosetRepository.run {
+                                        // Trigger via internal path — use approve pattern
+                                    }
+                                    NotificationCenter.onWardrobeEvent(
+                                        com.closetos.app.data.model.WardrobeEventType.GARMENT_ADDED,
+                                        fake,
+                                        before,
+                                        after
+                                    )
+                                    showToast("Simulated wardrobe unlock")
+                                } else {
+                                    showToast("Add garments first")
+                                }
+                                scope.launch { drawerState.close() }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = CharcoalSurface),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                        ) {
+                            Text("Simulate Unlock", color = AccentGold, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
                                 hasCompletedOnboarding = !hasCompletedOnboarding
                                 PlatformStorage.saveString("has_completed_onboarding", hasCompletedOnboarding.toString())
                                 val status = if (hasCompletedOnboarding) "Bypassed Onboarding" else "Onboarding Quiz Required"
@@ -169,6 +229,12 @@ fun App() {
                                 IconButton(onClick = { scope.launch { drawerState.open() } }) {
                                     Icon(Icons.Default.Settings, contentDescription = "Debug Drawer", tint = AccentGold)
                                 }
+                            },
+                            actions = {
+                                NotificationBell(
+                                    unreadCount = unreadCount,
+                                    onClick = { showNotificationInbox = true }
+                                )
                             },
                             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                                 containerColor = ObsidianBg,
@@ -232,7 +298,22 @@ fun App() {
                             Screen.Resale.route -> ResaleScreen()
                         }
                     }
+
+                    WardrobeEvolutionBanner(
+                        notification = activeBanner,
+                        onDismiss = { NotificationCenter.dismissBanner() },
+                        onAction = { handleNotificationAction(it) },
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
                 }
+
+                NotificationInboxSheet(
+                    visible = showNotificationInbox,
+                    notifications = allNotifications,
+                    onDismiss = { showNotificationInbox = false },
+                    onNotificationClick = { handleNotificationAction(it) },
+                    onMarkAllRead = { NotificationCenter.markAllRead() }
+                )
             }
         }
     }

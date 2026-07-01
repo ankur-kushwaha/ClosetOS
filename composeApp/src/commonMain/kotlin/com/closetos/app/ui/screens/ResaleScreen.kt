@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.closetos.app.data.model.Garment
 import com.closetos.app.data.repository.ClosetRepository
+import com.closetos.app.data.repository.NotificationCenter
 import com.closetos.app.showToast
 import com.closetos.app.ui.components.ElegantButton
 import com.closetos.app.ui.components.GlassmorphicCard
@@ -189,6 +190,7 @@ fun ResaleScreen() {
                 ElegantButton(
                     text = "Publish List API",
                     onClick = {
+                        ClosetRepository.sellGarment(garment.id)
                         showToast("Listing published on $selectedResalePlatform API! Synced in Wardrobe.")
                         selectedGarmentForResale = null
                     }

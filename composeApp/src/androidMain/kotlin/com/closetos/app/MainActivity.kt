@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import com.closetos.app.data.repository.ClosetRepository
+import com.closetos.app.data.repository.NotificationCenter
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -14,6 +15,7 @@ class MainActivity : ComponentActivity() {
         
         // Initialize repository
         ClosetRepository.init()
+        NotificationCenter.init()
         
         setContent {
             App()

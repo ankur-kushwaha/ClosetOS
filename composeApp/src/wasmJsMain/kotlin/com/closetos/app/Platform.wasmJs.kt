@@ -144,8 +144,120 @@ actual suspend fun runImageExtraction(
     ))
 }
 
-actual suspend fun fetchWeatherTemp(): Pair<Float, String> {
-    return Pair(72f, "Clear & Sunny")
+actual suspend fun fetchWeatherInfo(): WeatherInfo {
+    val coords = getBrowserCoordinates()
+    val lat = coords?.first ?: 51.5074
+    val lon = coords?.second ?: -0.1278
+    val locationName = if (coords != null) {
+        resolveLocationName(lat, lon)
+    } else {
+        "Location unavailable"
+    }
+    return fetchWeatherForCoordinates(lat, lon, locationName)
+}
+
+@Composable
+actual fun RequestLocationPermission(onResult: (granted: Boolean) -> Unit) {
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        onResult(true)
+    }
+}
+
+@JsFun("""
+(callback) => {
+  if (!navigator.geolocation) { callback(null); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => callback(pos.coords.latitude + ',' + pos.coords.longitude),
+    () => callback(null),
+    { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
+  );
+}
+""")
+private external fun getBrowserCoordinatesJs(callback: (String?) -> Unit)
+
+private suspend fun getBrowserCoordinates(): Pair<Double, Double>? = suspendCoroutine { cont ->
+    getBrowserCoordinatesJs { value ->
+        if (value == null) {
+            cont.resume(null)
+        } else {
+            val parts = value.split(",")
+            if (parts.size == 2) {
+                cont.resume(Pair(parts[0].toDouble(), parts[1].toDouble()))
+            } else {
+                cont.resume(null)
+            }
+        }
+    }
+}
+
+@JsFun("""
+(url, callback) => {
+  fetch(url)
+    .then(r => r.text())
+    .then(t => callback(t))
+    .catch(() => callback(null));
+}
+""")
+private external fun httpGetJs(url: String, callback: (String?) -> Unit)
+
+private suspend fun httpGet(url: String): String? = suspendCoroutine { cont ->
+    httpGetJs(url) { cont.resume(it) }
+}
+
+private suspend fun resolveLocationName(lat: Double, lon: Double): String {
+    val response = httpGet(
+        "https://geocoding-api.open-meteo.com/v1/reverse?latitude=$lat&longitude=$lon&language=en&count=1"
+    ) ?: return "Unknown location"
+    return try {
+        val nameKey = "\"name\":"
+        val adminKey = "\"admin1\":"
+        val countryKey = "\"country\":"
+        fun extractString(key: String): String {
+            val idx = response.indexOf(key)
+            if (idx < 0) return ""
+            val start = response.indexOf('"', idx + key.length) + 1
+            val end = response.indexOf('"', start)
+            return if (start > 0 && end > start) response.substring(start, end) else ""
+        }
+        val name = extractString(nameKey)
+        val admin1 = extractString(adminKey)
+        when {
+            name.isNotEmpty() && admin1.isNotEmpty() -> "$name, $admin1"
+            name.isNotEmpty() -> name
+            else -> extractString(countryKey).ifEmpty { "Unknown location" }
+        }
+    } catch (_: Exception) {
+        "Unknown location"
+    }
+}
+
+private suspend fun fetchWeatherForCoordinates(lat: Double, lon: Double, locationName: String): WeatherInfo {
+    val response = httpGet(
+        "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current_weather=true"
+    ) ?: return WeatherInfo(23f, "Clear & Sunny", locationName)
+    return try {
+        val tempKey = "\"temperature\":"
+        val codeKey = "\"weathercode\":"
+        fun extractNumber(key: String): Float {
+            val idx = response.indexOf(key)
+            if (idx < 0) return 23f
+            val start = idx + key.length
+            val end = response.indexOfAny(charArrayOf(',', '}'), start)
+            return response.substring(start, end).trim().toFloat()
+        }
+        fun extractInt(key: String): Int {
+            val idx = response.indexOf(key)
+            if (idx < 0) return 0
+            val start = idx + key.length
+            val end = response.indexOfAny(charArrayOf(',', '}'), start)
+            return response.substring(start, end).trim().toInt()
+        }
+        val tempC = extractNumber(tempKey)
+        val code = extractInt(codeKey)
+        WeatherInfo(tempC, describeWeatherCode(code), locationName)
+    } catch (_: Exception) {
+        WeatherInfo(23f, "Clear & Sunny", locationName)
+    }
 }
 
 actual fun defaultBackendUrl(): String = "http://127.0.0.1:8000"

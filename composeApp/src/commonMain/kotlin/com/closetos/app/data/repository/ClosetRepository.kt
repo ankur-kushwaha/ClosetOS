@@ -399,42 +399,60 @@ object ClosetRepository {
         saveData()
     }
 
+    private fun isOutfitInWardrobe(outfit: Outfit): Boolean {
+        if (outfit.garments.isEmpty()) return false
+        val wardrobeIds = _garments.value.map { it.id }.toSet()
+        return outfit.garments.all { it.id in wardrobeIds }
+    }
+
+    private fun syncOutfitWithWardrobe(outfit: Outfit): Outfit {
+        val byId = _garments.value.associateBy { it.id }
+        return outfit.copy(garments = outfit.garments.mapNotNull { byId[it.id] })
+    }
+
+    private fun wardrobeOutfits(): List<Outfit> {
+        return _lookbookOutfits.value
+            .filter { isOutfitInWardrobe(it) }
+            .map { syncOutfitWithWardrobe(it) }
+    }
+
     fun getRecommendedOutfits(limit: Int = 6): List<Outfit> {
         ensureLookbookPopulated()
-        return _lookbookOutfits.value
+        return wardrobeOutfits()
             .sortedByDescending { it.overallScore }
             .take(limit)
     }
 
     fun getRecentlyWornOutfits(limit: Int = 6): List<Outfit> {
-        return _lookbookOutfits.value
+        return wardrobeOutfits()
             .filter { it.lastWornMs != null }
             .sortedByDescending { it.lastWornMs }
             .take(limit)
     }
 
     fun getFavoriteOutfits(limit: Int = 6): List<Outfit> {
-        return _lookbookOutfits.value.filter { it.isFavorite }.take(limit)
+        return wardrobeOutfits().filter { it.isFavorite }.take(limit)
     }
 
     fun getSavedOutfits(limit: Int = 12): List<Outfit> {
-        return _lookbookOutfits.value.filter { it.isSaved }.take(limit)
+        return wardrobeOutfits().filter { it.isSaved }.take(limit)
     }
 
     fun getAiGeneratedOutfits(limit: Int = 6): List<Outfit> {
-        return _lookbookOutfits.value.filter { it.isAiGenerated }.take(limit)
+        return wardrobeOutfits().filter { it.isAiGenerated }.take(limit)
     }
 
     fun getTrendingOutfits(limit: Int = 6): List<Outfit> {
-        return _lookbookOutfits.value
+        return wardrobeOutfits()
             .sortedByDescending { it.wornCount * 0.6f + it.overallScore * 0.4f }
             .take(limit)
     }
 
     fun searchOutfits(query: String): List<Outfit> {
-        if (query.isBlank()) return _lookbookOutfits.value
+        val inWardrobe = wardrobeOutfits()
+        if (query.isBlank()) return inWardrobe
         val term = query.lowercase()
-        return _lookbookOutfits.value.filter { outfit ->
+        return inWardrobe.filter { outfit ->
             outfit.name.lowercase().contains(term) ||
                 outfit.tags.any { it.lowercase().contains(term) } ||
                 outfit.bestFor.any { it.lowercase().contains(term) } ||
@@ -448,11 +466,12 @@ object ClosetRepository {
 
     fun getOutfitsForCollection(collectionId: String): List<Outfit> {
         val collection = _collections.value.find { it.id == collectionId } ?: return emptyList()
-        return collection.outfitIds.mapNotNull { id -> _lookbookOutfits.value.find { it.id == id } }
+        val inWardrobeById = wardrobeOutfits().associateBy { it.id }
+        return collection.outfitIds.mapNotNull { inWardrobeById[it] }
     }
 
     fun getOutfitsForOccasion(occasion: String, limit: Int = 6): List<Outfit> {
-        return _lookbookOutfits.value.filter { outfit ->
+        return wardrobeOutfits().filter { outfit ->
             outfit.bestFor.any { it.equals(occasion, ignoreCase = true) } ||
                 outfit.tags.any { it.equals(occasion, ignoreCase = true) } ||
                 outfit.name.contains(occasion, ignoreCase = true)
@@ -466,7 +485,7 @@ object ClosetRepository {
         return collection
     }
 
-    fun getOutfitById(id: String): Outfit? = _lookbookOutfits.value.find { it.id == id }
+    fun getOutfitById(id: String): Outfit? = wardrobeOutfits().find { it.id == id }
 
     private fun ensureLookbookPopulated() {
         if (_lookbookOutfits.value.isEmpty() && _garments.value.isNotEmpty()) {
@@ -614,12 +633,22 @@ object ClosetRepository {
     }
 
     fun approveIngestionItem(itemId: String) {
-        val item = _ingestionQueue.value.find { it.id == itemId }
-        item?.detectedGarment?.let { garment ->
-            _garments.value = _garments.value + garment
+        val item = _ingestionQueue.value.find { it.id == itemId } ?: return
+        val garment = item.detectedGarment ?: return
+        val before = _garments.value
+        val after = before + garment
+        val eventType = if (item.isManualUpload) {
+            WardrobeEventType.GARMENT_ADDED
+        } else {
+            WardrobeEventType.GARMENT_PURCHASED
         }
+        _garments.value = after
+        val beforeFps = discoverOutfits(before).map { outfitFingerprint(it) }.toSet()
+        val unlocked = discoverOutfits(after).filter { outfitFingerprint(it) !in beforeFps }
+        mergeNewOutfitsIntoLookbook(unlocked)
         _ingestionQueue.value = _ingestionQueue.value.filter { it.id != itemId }
         saveData()
+        NotificationCenter.onWardrobeEvent(eventType, garment, before, after)
     }
 
     fun rejectIngestionItem(itemId: String) {
@@ -644,8 +673,42 @@ object ClosetRepository {
     }
 
     fun deleteGarment(garmentId: String) {
-        _garments.value = _garments.value.filter { it.id != garmentId }
+        val before = _garments.value
+        val garment = before.find { it.id == garmentId } ?: return
+        val after = before.filter { it.id != garmentId }
+        _garments.value = after
+        pruneLookbookOutfitsNotInWardrobe()
         saveData()
+        NotificationCenter.onWardrobeEvent(
+            WardrobeEventType.GARMENT_REMOVED,
+            garment,
+            before,
+            after
+        )
+    }
+
+    fun sellGarment(garmentId: String) {
+        val before = _garments.value
+        val garment = before.find { it.id == garmentId } ?: return
+        val after = before.filter { it.id != garmentId }
+        _garments.value = after
+        pruneLookbookOutfitsNotInWardrobe()
+        saveData()
+        NotificationCenter.onWardrobeEvent(
+            WardrobeEventType.GARMENT_SOLD,
+            garment,
+            before,
+            after
+        )
+    }
+
+    private fun pruneLookbookOutfitsNotInWardrobe() {
+        val validOutfits = wardrobeOutfits()
+        val validOutfitIds = validOutfits.map { it.id }.toSet()
+        _lookbookOutfits.value = validOutfits
+        _collections.value = _collections.value.map { collection ->
+            collection.copy(outfitIds = collection.outfitIds.filter { it in validOutfitIds })
+        }
     }
 
     fun toggleGarmentLaundry(garmentId: String) {
@@ -755,8 +818,103 @@ object ClosetRepository {
         return vec
     }
 
-    fun generateRecommendations(temperature: Float, occasionName: String): List<Outfit> {
-        val allItems = _garments.value
+    fun outfitFingerprint(outfit: Outfit): String =
+        outfit.garments.map { it.id }.sorted().joinToString("|")
+
+    fun discoverOutfits(garments: List<Garment>): List<Outfit> {
+        if (garments.isEmpty()) return emptyList()
+        val occasionTemps = listOf(
+            "Office" to 74f,
+            "Dinner" to 72f,
+            "Travel" to 65f,
+            "Weekend" to 68f
+        )
+        return occasionTemps
+            .flatMap { (occasion, temp) ->
+                generateRecommendations(temp, occasion, garments).map { enrichOutfit(it) }
+            }
+            .distinctBy { outfitFingerprint(it) }
+    }
+
+    fun computeWardrobeEvolution(
+        eventType: WardrobeEventType,
+        garment: Garment?,
+        beforeGarments: List<Garment>,
+        afterGarments: List<Garment>
+    ): WardrobeEvolutionPayload? {
+        val garmentLabel = garment?.let { "${it.colorName} ${it.subcategory}".trim() }.orEmpty()
+        val beforeFps = discoverOutfits(beforeGarments).map { outfitFingerprint(it) }.toSet()
+        val afterOutfits = discoverOutfits(afterGarments)
+
+        return when (eventType) {
+            WardrobeEventType.GARMENT_ADDED,
+            WardrobeEventType.GARMENT_PURCHASED -> {
+                val triggerId = garment?.id
+                val unlocked = afterOutfits.filter { outfit ->
+                    outfitFingerprint(outfit) !in beforeFps &&
+                        (triggerId == null || outfit.garments.any { it.id == triggerId })
+                }
+                if (garment == null) return null
+                WardrobeEvolutionPayload(
+                    eventType = eventType,
+                    garmentId = triggerId,
+                    garmentLabel = garmentLabel,
+                    totalNewOutfits = unlocked.size,
+                    occasionUnlocks = bucketOccasionUnlocks(unlocked),
+                    spotlightOutfitIds = unlocked.take(6).map { it.id }
+                )
+            }
+            WardrobeEventType.GARMENT_REMOVED,
+            WardrobeEventType.GARMENT_SOLD -> {
+                val spotlight = afterOutfits
+                    .sortedByDescending { it.overallScore }
+                    .take(12)
+                WardrobeEvolutionPayload(
+                    eventType = eventType,
+                    garmentId = garment?.id,
+                    garmentLabel = garmentLabel,
+                    totalNewOutfits = spotlight.size,
+                    occasionUnlocks = bucketOccasionUnlocks(spotlight),
+                    spotlightOutfitIds = spotlight.map { it.id }
+                )
+            }
+        }
+    }
+
+    private fun bucketOccasionUnlocks(outfits: List<Outfit>): List<OccasionUnlock> {
+        val buckets = linkedMapOf(
+            "Business looks" to listOf("office", "business", "meeting", "formal"),
+            "Date-night looks" to listOf("dinner", "date"),
+            "Travel looks" to listOf("travel"),
+            "Weekend looks" to listOf("weekend", "casual")
+        )
+        return buckets.map { (label, keywords) ->
+            val count = outfits.count { outfit ->
+                keywords.any { keyword ->
+                    outfit.tags.any { it.contains(keyword, ignoreCase = true) } ||
+                        outfit.bestFor.any { it.contains(keyword, ignoreCase = true) } ||
+                        outfit.name.contains(keyword, ignoreCase = true)
+                }
+            }
+            OccasionUnlock(label, count)
+        }
+    }
+
+    private fun mergeNewOutfitsIntoLookbook(newOutfits: List<Outfit>) {
+        if (newOutfits.isEmpty()) return
+        val existing = _lookbookOutfits.value.map { outfitFingerprint(it) }.toSet()
+        val toAdd = newOutfits.filter { outfitFingerprint(it) !in existing }
+        if (toAdd.isNotEmpty()) {
+            _lookbookOutfits.value = _lookbookOutfits.value + toAdd
+        }
+    }
+
+    fun generateRecommendations(
+        temperature: Float,
+        occasionName: String,
+        garmentSource: List<Garment> = _garments.value
+    ): List<Outfit> {
+        val allItems = garmentSource
         val cleanItems = allItems.filter { it.laundryStatus == LaundryStatus.CLEAN }
         
         if (cleanItems.isEmpty()) return emptyList()

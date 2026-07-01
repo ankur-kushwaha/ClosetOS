@@ -37,23 +37,30 @@ import kotlinx.coroutines.launch
 fun OotdScreen() {
     val scope = rememberCoroutineScope()
 
-    // Context context variables
-    var currentTemp by remember { mutableStateOf(74f) }
+    var currentTempC by remember { mutableStateOf(23f) }
     var weatherDesc by remember { mutableStateOf("Clear & Sunny") }
+    var locationName by remember { mutableStateOf("") }
     val occasionContext = "Work Presentation & Socials"
+    var weatherRefreshKey by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(Unit) {
-        val weatherInfo = fetchWeatherTemp()
-        currentTemp = weatherInfo.first
-        weatherDesc = weatherInfo.second
+    RequestLocationPermission { granted ->
+        if (granted) weatherRefreshKey++
+    }
+
+    LaunchedEffect(weatherRefreshKey) {
+        val weatherInfo = fetchWeatherInfo()
+        currentTempC = weatherInfo.tempCelsius
+        weatherDesc = weatherInfo.description
+        locationName = weatherInfo.locationName
     }
 
     // Recommendations list from Repository
     val garmentsList by ClosetRepository.garments.collectAsState()
     
-    // Generate cached recommendations overnight
-    val cachedOutfits = remember(garmentsList, currentTemp) {
-        ClosetRepository.generateRecommendations(currentTemp, occasionContext)
+    // Generate cached recommendations overnight (repository uses Fahrenheit)
+    val tempFahrenheit = currentTempC * 9f / 5f + 32f
+    val cachedOutfits = remember(garmentsList, currentTempC) {
+        ClosetRepository.generateRecommendations(tempFahrenheit, occasionContext)
     }
 
     var selectedOutfitIndex by remember { mutableStateOf(0) }
@@ -105,7 +112,7 @@ fun OotdScreen() {
                 )
             }
 
-            // Weather & Schedule pill
+            // Weather & location pill
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))
@@ -114,20 +121,41 @@ fun OotdScreen() {
                     .padding(horizontal = 12.dp, vertical = 6.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.WbSunny,
-                        contentDescription = null,
-                        tint = AccentGold,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "${currentTemp.toInt()}°F • $weatherDesc",
-                        fontFamily = OutfitFont,
-                        fontSize = 12.sp,
-                        color = TextLight
-                    )
+                Column(horizontalAlignment = Alignment.End) {
+                    if (locationName.isNotEmpty()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.LocationOn,
+                                contentDescription = null,
+                                tint = AccentGold,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = locationName,
+                                fontFamily = OutfitFont,
+                                fontSize = 11.sp,
+                                color = TextMuted,
+                                maxLines = 1
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.WbSunny,
+                            contentDescription = null,
+                            tint = AccentGold,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "${currentTempC.toInt()}°C • $weatherDesc",
+                            fontFamily = OutfitFont,
+                            fontSize = 12.sp,
+                            color = TextLight
+                        )
+                    }
                 }
             }
         }

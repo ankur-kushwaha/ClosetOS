@@ -1,6 +1,12 @@
 package com.closetos.app
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Looper
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -14,11 +20,17 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.closetos.app.data.model.Garment
 import com.closetos.app.data.model.LaundryStatus
 import com.closetos.app.data.model.NormalizationResult
@@ -26,7 +38,9 @@ import com.closetos.app.data.model.TravelCapsulePlan
 import com.closetos.app.data.model.TravelDayOutfit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.io.File
@@ -478,37 +492,159 @@ private val garmentTemplates = listOf(
     GarmentTemplate("Shoes", "Canvas Sneakers", "Cotton Canvas", "Plain", "Standard", "Low-top", "Common Projects", 290.0, listOf("Summer", "Spring"), 0.1f)
 )
 
-actual suspend fun fetchWeatherTemp(): Pair<Float, String> {
-    return withContext(Dispatchers.IO) {
-        try {
-            val url = java.net.URL("https://api.open-meteo.com/v1/forecast?latitude=51.5074&longitude=-0.1278&current_weather=true")
-            val connection = url.openConnection() as java.net.HttpURLConnection
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            
-            val response = connection.inputStream.bufferedReader().use { it.readText() }
-            val jsonObj = org.json.JSONObject(response)
-            val currentWeather = jsonObj.getJSONObject("current_weather")
-            val tempC = currentWeather.getDouble("temperature").toFloat()
-            val tempF = (tempC * 9f / 5f) + 32f
-            val code = currentWeather.getInt("weathercode")
-            val desc = when (code) {
-                0 -> "Clear & Sunny"
-                1, 2, 3 -> "Partly Cloudy"
-                45, 48 -> "Foggy Weather"
-                51, 53, 55 -> "Light Drizzle"
-                61, 63, 65 -> "Rainy Day"
-                71, 73, 75 -> "Snowy Day"
-                80, 81, 82 -> "Showers"
-                95, 96, 99 -> "Thunderstorms"
-                else -> "Muted Day"
-            }
-            Pair(tempF, desc)
-        } catch (e: Exception) {
-            Pair(74f, "Clear & Sunny")
+@Composable
+actual fun RequestLocationPermission(onResult: (granted: Boolean) -> Unit) {
+    val context = LocalContext.current
+    var resolved by remember { mutableStateOf(false) }
+    var requested by remember { mutableStateOf(false) }
+
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        if (!resolved) {
+            resolved = true
+            val granted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                result[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+            onResult(granted)
         }
     }
+
+    LaunchedEffect(Unit) {
+        if (resolved) return@LaunchedEffect
+        val hasPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (hasPermission) {
+            resolved = true
+            onResult(true)
+        } else if (!requested) {
+            requested = true
+            launcher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
+}
+
+private suspend fun getCurrentCoordinates(): Pair<Double, Double>? = withContext(Dispatchers.IO) {
+    val context = PlatformStorage.applicationContext ?: return@withContext null
+    val fineGranted = ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    val coarseGranted = ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    if (!fineGranted && !coarseGranted) return@withContext null
+
+    val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    val providers = listOf(
+        LocationManager.GPS_PROVIDER,
+        LocationManager.NETWORK_PROVIDER,
+        LocationManager.PASSIVE_PROVIDER
+    )
+    for (provider in providers) {
+        try {
+            val last = locationManager.getLastKnownLocation(provider)
+            if (last != null && (last.latitude != 0.0 || last.longitude != 0.0)) {
+                return@withContext Pair(last.latitude, last.longitude)
+            }
+        } catch (_: SecurityException) {
+        }
+    }
+
+    suspendCancellableCoroutine { cont ->
+        val listener = object : LocationListener {
+            override fun onLocationChanged(location: Location) {
+                locationManager.removeUpdates(this)
+                if (cont.isActive) cont.resume(Pair(location.latitude, location.longitude))
+            }
+
+            override fun onProviderDisabled(provider: String) {}
+            override fun onProviderEnabled(provider: String) {}
+            @Deprecated("Deprecated in Java")
+            override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
+        }
+
+        val provider = when {
+            locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
+            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
+            else -> {
+                cont.resume(null)
+                return@suspendCancellableCoroutine
+            }
+        }
+
+        try {
+            @Suppress("DEPRECATION")
+            locationManager.requestSingleUpdate(provider, listener, Looper.getMainLooper())
+        } catch (_: SecurityException) {
+            cont.resume(null)
+            return@suspendCancellableCoroutine
+        }
+
+        cont.invokeOnCancellation {
+            locationManager.removeUpdates(listener)
+        }
+    }
+}
+
+private fun httpGet(urlString: String): String? {
+    return try {
+        val url = java.net.URL(urlString)
+        val connection = url.openConnection() as java.net.HttpURLConnection
+        connection.requestMethod = "GET"
+        connection.connectTimeout = 8000
+        connection.readTimeout = 8000
+        connection.inputStream.bufferedReader().use { it.readText() }
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private fun resolveLocationName(lat: Double, lon: Double): String {
+    val response = httpGet(
+        "https://geocoding-api.open-meteo.com/v1/reverse?latitude=$lat&longitude=$lon&language=en&count=1"
+    ) ?: return "Unknown location"
+    return try {
+        val json = JSONObject(response)
+        val results = json.optJSONArray("results") ?: return "Unknown location"
+        if (results.length() == 0) return "Unknown location"
+        val place = results.getJSONObject(0)
+        val name = place.optString("name", "")
+        val admin1 = place.optString("admin1", "")
+        when {
+            name.isNotEmpty() && admin1.isNotEmpty() -> "$name, $admin1"
+            name.isNotEmpty() -> name
+            else -> place.optString("country", "Unknown location")
+        }
+    } catch (_: Exception) {
+        "Unknown location"
+    }
+}
+
+private fun fetchWeatherForCoordinates(lat: Double, lon: Double, locationName: String): WeatherInfo {
+    val response = httpGet(
+        "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current_weather=true"
+    )
+    if (response == null) {
+        return WeatherInfo(23f, "Clear & Sunny", locationName)
+    }
+    return try {
+        val jsonObj = JSONObject(response)
+        val currentWeather = jsonObj.getJSONObject("current_weather")
+        val tempC = currentWeather.getDouble("temperature").toFloat()
+        val code = currentWeather.getInt("weathercode")
+        WeatherInfo(tempC, describeWeatherCode(code), locationName)
+    } catch (_: Exception) {
+        WeatherInfo(23f, "Clear & Sunny", locationName)
+    }
+}
+
+actual suspend fun fetchWeatherInfo(): WeatherInfo = withContext(Dispatchers.IO) {
+    val coords = getCurrentCoordinates()
+    if (coords != null) {
+        val locationName = resolveLocationName(coords.first, coords.second)
+        return@withContext fetchWeatherForCoordinates(coords.first, coords.second, locationName)
+    }
+    fetchWeatherForCoordinates(51.5074, -0.1278, "Location unavailable")
 }
 
 actual fun defaultBackendUrl(): String = "http://10.0.2.2:8000"
