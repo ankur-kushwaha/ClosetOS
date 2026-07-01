@@ -62,7 +62,7 @@ def _run_florence_task(model, processor, image: Image.Image, task: str, device: 
 
 def _infer_category(label: str, caption: str) -> str:
     text = f"{label} {caption}".lower()
-    if any(w in text for w in ["sneaker", "loafer", "boot", "shoe", "sandal", "heel"]):
+    if any(w in text for w in ["sneaker", "loafer", "boot", "shoe", "sandal", "heel", "footwear"]):
         return "Shoes"
     if any(w in text for w in ["jacket", "coat", "blazer", "overcoat", "parka", "cardigan"]):
         return "Outerwear"

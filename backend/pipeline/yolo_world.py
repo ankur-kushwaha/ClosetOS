@@ -9,7 +9,7 @@ def detect_yolo_world(
     model_loaders,
     confidence: float = 0.1,
 ) -> List[Tuple[List[float], str, float]]:
-    """Detects garments (TopWear, BottomWear, Dress) in an image using YOLO-World.
+    """Detects garments (TopWear, BottomWear, Dress, Footwear) in an image using YOLO-World.
     
     Returns:
         List of tuples: (bbox, label, score) where bbox is [x1, y1, x2, y2]
@@ -20,7 +20,8 @@ def detect_yolo_world(
     vocab = [
         "top", "shirt", "t-shirt", "jacket", "sweater", "hoodie", "blouse",
         "pants", "jeans", "trousers", "shorts", "skirt",
-        "dress"
+        "dress",
+        "shoes", "sneakers", "boots", "loafers", "sandals", "heels",
     ]
     
     # Only set classes if not already set (to avoid MPS PyTorch embedding bugs on re-setting)
@@ -46,6 +47,8 @@ def detect_yolo_world(
             return "TopWear"
         if "dress" in lbl_l:
             return "Dress"
+        if any(w in lbl_l for w in ["shoe", "sneaker", "boot", "loafer", "sandal", "heel"]):
+            return "Footwear"
         return "Other"
 
     detected = []

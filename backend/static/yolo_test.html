@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>YOLO-World Garment Detector</title>
-  <meta name="description" content="Test YOLO-World model in isolation to detect TopWear, BottomWear, and Dress garments." />
+  <meta name="description" content="Test YOLO-World model in isolation to detect TopWear, BottomWear, Dress, and Footwear garments." />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -25,6 +25,8 @@
       --color-bottomwear-bg: rgba(168, 85, 247, 0.15);
       --color-dress: #eab308;
       --color-dress-bg: rgba(234, 179, 8, 0.15);
+      --color-footwear: #10b981;
+      --color-footwear-bg: rgba(16, 185, 129, 0.15);
       
       --font-sans: 'Outfit', sans-serif;
       --font-mono: 'JetBrains Mono', monospace;
@@ -259,6 +261,7 @@
     .class-dot.topwear { background-color: var(--color-topwear); box-shadow: 0 0 8px var(--color-topwear); }
     .class-dot.bottomwear { background-color: var(--color-bottomwear); box-shadow: 0 0 8px var(--color-bottomwear); }
     .class-dot.dress { background-color: var(--color-dress); box-shadow: 0 0 8px var(--color-dress); }
+    .class-dot.footwear { background-color: var(--color-footwear); box-shadow: 0 0 8px var(--color-footwear); }
     
     .class-name {
       font-size: 0.9rem;
@@ -486,6 +489,12 @@
       box-shadow: 0 0 12px rgba(234, 179, 8, 0.2);
     }
     
+    .bbox-item.footwear {
+      border-color: var(--color-footwear);
+      background-color: var(--color-footwear-bg);
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.2);
+    }
+    
     /* Hover scale and brightness boost */
     .bbox-item:hover {
       border-width: 3px;
@@ -496,6 +505,7 @@
     .bbox-item.topwear:hover { box-shadow: 0 0 20px var(--color-topwear); }
     .bbox-item.bottomwear:hover { box-shadow: 0 0 20px var(--color-bottomwear); }
     .bbox-item.dress:hover { box-shadow: 0 0 20px var(--color-dress); }
+    .bbox-item.footwear:hover { box-shadow: 0 0 20px var(--color-footwear); }
     
     /* Floating Tooltip Label */
     .bbox-tag {
@@ -520,6 +530,7 @@
     .bbox-item.topwear .bbox-tag { background: var(--color-topwear); }
     .bbox-item.bottomwear .bbox-tag { background: var(--color-bottomwear); }
     .bbox-item.dress .bbox-tag { background: var(--color-dress); }
+    .bbox-item.footwear .bbox-tag { background: var(--color-footwear); }
     
     .bbox-item:hover .bbox-tag {
       transform: scale(1.1);
@@ -725,6 +736,7 @@
     .crop-label.topwear { color: var(--color-topwear); }
     .crop-label.bottomwear { color: var(--color-bottomwear); }
     .crop-label.dress { color: var(--color-dress); }
+    .crop-label.footwear { color: var(--color-footwear); }
     
     .crop-score {
       color: var(--text-muted);
@@ -739,6 +751,7 @@
     .bbox-item.topwear.active-bbox { box-shadow: 0 0 24px var(--color-topwear), inset 0 0 10px var(--color-topwear); }
     .bbox-item.bottomwear.active-bbox { box-shadow: 0 0 24px var(--color-bottomwear), inset 0 0 10px var(--color-bottomwear); }
     .bbox-item.dress.active-bbox { box-shadow: 0 0 24px var(--color-dress), inset 0 0 10px var(--color-dress); }
+    .bbox-item.footwear.active-bbox { box-shadow: 0 0 24px var(--color-footwear), inset 0 0 10px var(--color-footwear); }
     
     /* Crop hover overlay styles */
     .crop-card-actions {
@@ -895,6 +908,17 @@
                 <span class="toggle-slider"></span>
               </div>
             </label>
+            
+            <label class="toggle-item">
+              <div class="toggle-left">
+                <span class="class-dot footwear"></span>
+                <span class="class-name">Footwear</span>
+              </div>
+              <div class="toggle-switch">
+                <input type="checkbox" id="toggle-footwear" checked />
+                <span class="toggle-slider"></span>
+              </div>
+            </label>
           </div>
         </div>
         
@@ -1036,6 +1060,7 @@
     const toggleTopwear = document.getElementById('toggle-topwear');
     const toggleBottomwear = document.getElementById('toggle-bottomwear');
     const toggleDress = document.getElementById('toggle-dress');
+    const toggleFootwear = document.getElementById('toggle-footwear');
     
     const detectedListCard = document.getElementById('detected-list-card');
     const detectedCount = document.getElementById('detected-count');
@@ -1148,6 +1173,7 @@
     toggleTopwear.addEventListener('change', renderOverlays);
     toggleBottomwear.addEventListener('change', renderOverlays);
     toggleDress.addEventListener('change', renderOverlays);
+    toggleFootwear.addEventListener('change', renderOverlays);
     
     function renderOverlays() {
       if (!detectionResult) return;
@@ -1169,6 +1195,7 @@
       const showTop = toggleTopwear.checked;
       const showBottom = toggleBottomwear.checked;
       const showDress = toggleDress.checked;
+      const showFootwear = toggleFootwear.checked;
       
       let visibleCount = 0;
       
@@ -1179,8 +1206,9 @@
         const isTop = label.toLowerCase() === 'topwear';
         const isBottom = label.toLowerCase() === 'bottomwear';
         const isDress = label.toLowerCase() === 'dress';
+        const isFootwear = label.toLowerCase() === 'footwear';
         
-        let shouldShow = (isTop && showTop) || (isBottom && showBottom) || (isDress && showDress);
+        let shouldShow = (isTop && showTop) || (isBottom && showBottom) || (isDress && showDress) || (isFootwear && showFootwear);
         
         // Add to sidebar item listing regardless of toggles, but style based on toggle
         const row = document.createElement('div');
@@ -1248,8 +1276,9 @@
           const isTop = label.toLowerCase() === 'topwear';
           const isBottom = label.toLowerCase() === 'bottomwear';
           const isDress = label.toLowerCase() === 'dress';
+          const isFootwear = label.toLowerCase() === 'footwear';
           
-          let shouldShow = (isTop && showTop) || (isBottom && showBottom) || (isDress && showDress);
+          let shouldShow = (isTop && showTop) || (isBottom && showBottom) || (isDress && showDress) || (isFootwear && showFootwear);
           
           if (!shouldShow) return;
           visibleCrops++;
@@ -1335,7 +1364,7 @@
         'Uploading image binary...',
         'Checking model storage state...',
         'Spinning up YOLO-World core engine...',
-        'Inferring boundaries for labels: TopWear, BottomWear, Dress...',
+        'Inferring boundaries for labels: TopWear, BottomWear, Dress, Footwear...',
         'Structuring response array...'
       ];
       let stepIdx = 0;
