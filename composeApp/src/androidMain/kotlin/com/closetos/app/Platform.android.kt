@@ -10,6 +10,7 @@ import android.graphics.RectF
 import android.net.Uri
 import android.util.Base64
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
@@ -72,6 +73,11 @@ actual fun showToast(message: String) {
     } catch (e: Exception) {
         println("Toast log: $message")
     }
+}
+
+@Composable
+actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
+    BackHandler(enabled = enabled, onBack = onBack)
 }
 
 @Composable

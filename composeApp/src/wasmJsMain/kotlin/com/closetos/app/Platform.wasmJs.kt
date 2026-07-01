@@ -33,6 +33,11 @@ actual fun showToast(message: String) {
 }
 
 @Composable
+actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
+    // Browser back is handled separately on wasm; no-op here.
+}
+
+@Composable
 actual fun rememberImageBitmap(path: String): ImageBitmap? {
     return null
 }

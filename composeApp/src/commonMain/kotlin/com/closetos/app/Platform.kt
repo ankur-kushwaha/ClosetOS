@@ -15,6 +15,9 @@ expect object PlatformStorage {
 expect fun showToast(message: String)
 
 @Composable
+expect fun PlatformBackHandler(enabled: Boolean = true, onBack: () -> Unit)
+
+@Composable
 expect fun rememberImageBitmap(path: String): ImageBitmap?
 
 @Composable

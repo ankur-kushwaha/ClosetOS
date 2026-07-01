@@ -56,51 +56,67 @@ private fun timeGreeting(): String {
 
 @Composable
 fun LookbookScreen() {
-    var nav by remember { mutableStateOf<LookbookNav>(LookbookNav.Landing) }
-  val outfits by ClosetRepository.lookbookOutfits.collectAsState()
+    var navStack by remember { mutableStateOf(listOf<LookbookNav>(LookbookNav.Landing)) }
+    val current = navStack.last()
 
-  LaunchedEffect(outfits.isEmpty()) {
+    fun push(destination: LookbookNav) {
+        navStack = navStack + destination
+    }
+
+    fun pop() {
+        if (navStack.size > 1) {
+            navStack = navStack.dropLast(1)
+        }
+    }
+
+    PlatformBackHandler(enabled = navStack.size > 1) {
+        pop()
+    }
+
+    val outfits by ClosetRepository.lookbookOutfits.collectAsState()
+
+    LaunchedEffect(outfits.isEmpty()) {
         if (outfits.isEmpty()) {
             ClosetRepository.seedLookbookData()
         }
     }
 
-    when (val current = nav) {
+    when (val screen = current) {
         LookbookNav.Landing -> LookbookLanding(
-            onSection = { type, title -> nav = LookbookNav.Section(type, title) },
-            onCollection = { nav = LookbookNav.Collection(it) },
-            onOutfit = { nav = LookbookNav.OutfitDetail(it.id) },
-            onSearch = { nav = LookbookNav.Search },
-            onGenerate = { nav = LookbookNav.Builder }
+            onSection = { type, title -> push(LookbookNav.Section(type, title)) },
+            onCollection = { push(LookbookNav.Collection(it)) },
+            onOutfit = { push(LookbookNav.OutfitDetail(it.id)) },
+            onSearch = { push(LookbookNav.Search) },
+            onGenerate = { push(LookbookNav.Builder) }
         )
         is LookbookNav.Section -> LookbookSectionScreen(
-            section = current.type,
-            title = current.title,
-            onBack = { nav = LookbookNav.Landing },
-            onOutfit = { nav = LookbookNav.OutfitDetail(it.id) }
+            section = screen.type,
+            title = screen.title,
+            onBack = { pop() },
+            onOutfit = { push(LookbookNav.OutfitDetail(it.id)) }
         )
         is LookbookNav.Collection -> LookbookCollectionScreen(
-            collection = current.collection,
-            onBack = { nav = LookbookNav.Landing },
-            onOutfit = { nav = LookbookNav.OutfitDetail(it.id) }
+            collection = screen.collection,
+            onBack = { pop() },
+            onOutfit = { push(LookbookNav.OutfitDetail(it.id)) }
         )
         is LookbookNav.OutfitDetail -> {
-            val outfit = ClosetRepository.getOutfitById(current.outfitId)
+            val outfit = ClosetRepository.getOutfitById(screen.outfitId)
             if (outfit != null) {
                 OutfitDetailScreen(
                     outfit = outfit,
-                    onBack = { nav = LookbookNav.Landing },
-                    onEdit = { nav = LookbookNav.Builder }
+                    onBack = { pop() },
+                    onEdit = { push(LookbookNav.Builder) }
                 )
             } else {
-                LaunchedEffect(Unit) { nav = LookbookNav.Landing }
+                LaunchedEffect(Unit) { pop() }
             }
         }
         LookbookNav.Search -> LookbookSearchScreen(
-            onBack = { nav = LookbookNav.Landing },
-            onOutfit = { nav = LookbookNav.OutfitDetail(it.id) }
+            onBack = { pop() },
+            onOutfit = { push(LookbookNav.OutfitDetail(it.id)) }
         )
-        LookbookNav.Builder -> OutfitBuilderScreen(onBack = { nav = LookbookNav.Landing })
+        LookbookNav.Builder -> OutfitBuilderScreen(onBack = { pop() })
     }
 }
 
