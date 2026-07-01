@@ -57,7 +57,23 @@ data class Outfit(
     val formalityCoherence: Float = 0.0f,
     val overallScore: Float = 0.0f,
     val tags: List<String> = emptyList(),
-    val reason: String = ""
+    val reason: String = "",
+    val wornCount: Int = 0,
+    val avgCostPerWear: Double = 0.0,
+    val temperatureC: Float = 22f,
+    val isFavorite: Boolean = false,
+    val isSaved: Boolean = false,
+    val isAiGenerated: Boolean = false,
+    val lastWornMs: Long? = null,
+    val bestFor: List<String> = emptyList(),
+    val aiNote: String = ""
+)
+
+data class LookbookCollection(
+    val id: String = generateUUID(),
+    val name: String,
+    val outfitIds: List<String> = emptyList(),
+    val isUserCreated: Boolean = false
 )
 
 data class UserTaste(

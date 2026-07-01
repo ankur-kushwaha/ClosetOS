@@ -24,10 +24,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.closetos.app.data.model.Garment
+import com.closetos.app.data.model.Outfit
+import com.closetos.app.data.model.LookbookCollection
 import com.closetos.app.rememberImageBitmap
 import com.closetos.app.ui.theme.*
 import kotlin.math.pow
@@ -341,5 +353,301 @@ fun LookbookGarmentChip(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+    }
+}
+
+@Composable
+fun StarRating(score: Float, modifier: Modifier = Modifier) {
+    val stars = (score * 5f).coerceIn(0f, 5f)
+    val fullStars = stars.toInt()
+    val hasHalf = stars - fullStars >= 0.5f
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        repeat(5) { index ->
+            val tint = when {
+                index < fullStars -> AccentGold
+                index == fullStars && hasHalf -> AccentGold.copy(alpha = 0.5f)
+                else -> TextMuted.copy(alpha = 0.35f)
+            }
+            Icon(
+                imageVector = Icons.Default.Star,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(14.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun OutfitPreviewStack(
+    outfit: Outfit,
+    modifier: Modifier = Modifier
+) {
+    val ordered = outfit.garments.sortedBy { garment ->
+        when (garment.category) {
+            "Top" -> 0
+            "Bottom" -> 1
+            "Outerwear" -> 2
+            "Shoes" -> 3
+            else -> 4
+        }
+    }
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        ordered.forEachIndexed { index, garment ->
+            GarmentThumbnail(
+                garment = garment,
+                modifier = Modifier
+                    .fillMaxWidth(0.72f - index * 0.04f)
+                    .aspectRatio(0.75f)
+                    .offset(y = (index * 10).dp),
+                contentScale = ContentScale.Fit,
+                cornerRadius = 12
+            )
+        }
+    }
+}
+
+@Composable
+fun OutfitCard(
+    outfit: Outfit,
+    modifier: Modifier = Modifier,
+    temperatureC: Float = outfit.temperatureC,
+    onClick: () -> Unit = {},
+    onFavorite: () -> Unit = {},
+    onWearToday: () -> Unit = {},
+    onTryOn: () -> Unit = {},
+    onSave: () -> Unit = {},
+    compact: Boolean = false
+) {
+    val cardWidth = if (compact) 200.dp else 260.dp
+    val previewHeight = if (compact) 180.dp else 220.dp
+
+    Column(
+        modifier = modifier
+            .width(cardWidth)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFF131317))
+            .border(0.5.dp, GlassBorder, RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(previewHeight)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color(0xFF1A1A20), Color(0xFF101014))
+                    )
+                )
+                .padding(12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            OutfitPreviewStack(
+                outfit = outfit,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Text(
+                text = outfit.name,
+                fontFamily = PlayfairFont,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp,
+                color = TextLight,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            StarRating(score = outfit.overallScore)
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("Worn ${outfit.wornCount} times", fontFamily = OutfitFont, fontSize = 11.sp, color = TextMuted)
+                    Text(
+                        text = "Cost / Wear",
+                        fontFamily = OutfitFont,
+                        fontSize = 10.sp,
+                        color = TextMuted.copy(alpha = 0.7f)
+                    )
+                    Text(
+                        text = "$${formatCost(outfit.avgCostPerWear)}",
+                        fontFamily = OutfitFont,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = AccentGold
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.WbSunny, contentDescription = null, tint = AccentGold, modifier = Modifier.size(12.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "${temperatureC.toInt()}°C",
+                            fontFamily = OutfitFont,
+                            fontSize = 12.sp,
+                            color = TextLight
+                        )
+                    }
+                    Text("Weather", fontFamily = OutfitFont, fontSize = 10.sp, color = TextMuted.copy(alpha = 0.7f))
+                }
+            }
+
+            if (!compact) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onFavorite, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            imageVector = if (outfit.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = "Favorite",
+                            tint = if (outfit.isFavorite) Color(0xFFFF4081) else TextMuted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(onClick = onWearToday, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Checkroom, contentDescription = "Wear Today", tint = AccentGold, modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(onClick = onTryOn, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.AutoFixHigh, contentDescription = "Try On", tint = AccentGold, modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(onClick = onSave, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            imageVector = if (outfit.isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                            contentDescription = "Save",
+                            tint = if (outfit.isSaved) AccentGold else TextMuted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Icon(Icons.Default.MoreVert, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+    }
+}
+
+private fun formatCost(value: Double): String {
+    val whole = value.toInt()
+    val frac = ((value - whole) * 100).toInt().coerceIn(0, 99)
+    return "$whole.${frac.toString().padStart(2, '0')}"
+}
+
+@Composable
+fun CollectionPlaylistCard(
+    collection: LookbookCollection,
+    outfitCount: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .width(120.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(Color(0xFF1E1E26), Color(0xFF141418))
+                )
+            )
+            .border(0.5.dp, GlassBorder, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(14.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(AccentGold.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = collection.name.take(1).uppercase(),
+                fontFamily = PlayfairFont,
+                fontWeight = FontWeight.Bold,
+                fontSize = 22.sp,
+                color = AccentGold
+            )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = collection.name,
+            fontFamily = OutfitFont,
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp,
+            color = TextLight,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = "$outfitCount looks",
+            fontFamily = OutfitFont,
+            fontSize = 11.sp,
+            color = TextMuted
+        )
+    }
+}
+
+@Composable
+fun LookbookSectionHeader(
+    title: String,
+    emoji: String? = null,
+    onSeeAll: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = if (emoji != null) "$emoji $title" else title,
+            fontFamily = PlayfairFont,
+            fontWeight = FontWeight.Bold,
+            fontSize = 18.sp,
+            color = TextLight
+        )
+        if (onSeeAll != null) {
+            Text(
+                text = "See All >",
+                fontFamily = OutfitFont,
+                fontSize = 13.sp,
+                color = AccentGold,
+                modifier = Modifier.clickable(onClick = onSeeAll)
+            )
+        }
+    }
+}
+
+@Composable
+fun LookbookSearchBar(
+    query: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(GlassOverlay)
+            .border(0.5.dp, GlassBorder, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.Search, contentDescription = null, tint = TextMuted, modifier = Modifier.size(20.dp))
+        Spacer(modifier = Modifier.width(12.dp))
+        if (query.isEmpty()) {
+            Text("Search outfits", fontFamily = OutfitFont, fontSize = 15.sp, color = TextMuted)
+        } else {
+            Text(query, fontFamily = OutfitFont, fontSize = 15.sp, color = TextLight)
+        }
     }
 }

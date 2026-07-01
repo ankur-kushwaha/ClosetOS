@@ -32,7 +32,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object Ootd : Screen("ootd", "OOTD", Icons.Default.CalendarToday)
     object Ingest : Screen("ingest", "Digitize", Icons.Default.CloudUpload)
     object Wardrobe : Screen("wardrobe", "Wardrobe", Icons.Default.GridOn)
-    object Builder : Screen("builder", "Lookbook", Icons.Default.AutoFixHigh)
+    object Builder : Screen("builder", "Lookbook", Icons.Default.Style)
     object Travel : Screen("travel", "Travel", Icons.Default.FlightTakeoff)
     object Resale : Screen("resale", "Sell", Icons.Default.Sell)
 }
@@ -227,7 +227,7 @@ fun App() {
                                 sharedUrl = null
                             )
                             Screen.Wardrobe.route -> WardrobeScreen()
-                            Screen.Builder.route -> OutfitBuilderScreen()
+                            Screen.Builder.route -> LookbookScreen()
                             Screen.Travel.route -> TripPlannerScreen()
                             Screen.Resale.route -> ResaleScreen()
                         }

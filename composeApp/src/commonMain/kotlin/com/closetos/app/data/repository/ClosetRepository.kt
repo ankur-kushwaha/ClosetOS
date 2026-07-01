@@ -1,6 +1,7 @@
 package com.closetos.app.data.repository
 
 import com.closetos.app.PlatformStorage
+import com.closetos.app.getEpochTimeMillis
 import com.closetos.app.data.model.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +25,17 @@ object ClosetRepository {
     private val _tripPlans = MutableStateFlow<List<TripPlan>>(emptyList())
     val tripPlans: StateFlow<List<TripPlan>> = _tripPlans.asStateFlow()
 
+    private val _lookbookOutfits = MutableStateFlow<List<Outfit>>(emptyList())
+    val lookbookOutfits: StateFlow<List<Outfit>> = _lookbookOutfits.asStateFlow()
+
+    private val _collections = MutableStateFlow<List<LookbookCollection>>(emptyList())
+    val collections: StateFlow<List<LookbookCollection>> = _collections.asStateFlow()
+
+    val lookbookFilters = listOf(
+        "Office", "Travel", "Rainy", "Hot Weather", "Cold Weather",
+        "Minimal", "Streetwear", "Business", "Date", "Wedding", "Party"
+    )
+
     fun init() {
         loadData()
     }
@@ -32,19 +44,26 @@ object ClosetRepository {
         val savedText = PlatformStorage.loadString("closet_os_data.txt")
         if (savedText == null) {
             seedInitialCloset()
+            seedLookbookData()
             saveData()
             return
         }
 
         try {
-            val (loadedGarments, loadedTaste, historyAndTrips) = deserializeData(savedText)
-            _garments.value = loadedGarments
-            _userTaste.value = loadedTaste
-            _wearHistory.value = historyAndTrips.first
-            _tripPlans.value = historyAndTrips.second
+            val parsed = deserializeData(savedText)
+            _garments.value = parsed.garments
+            _userTaste.value = parsed.taste
+            _wearHistory.value = parsed.wearHistory
+            _tripPlans.value = parsed.tripPlans
+            _lookbookOutfits.value = parsed.outfits
+            _collections.value = parsed.collections
+            if (_lookbookOutfits.value.isEmpty()) {
+                seedLookbookData()
+            }
         } catch (e: Exception) {
             e.printStackTrace()
             seedInitialCloset()
+            seedLookbookData()
             saveData()
         }
     }
@@ -55,7 +74,9 @@ object ClosetRepository {
                 _garments.value,
                 _userTaste.value,
                 _wearHistory.value,
-                _tripPlans.value
+                _tripPlans.value,
+                _lookbookOutfits.value,
+                _collections.value
             )
             PlatformStorage.saveString("closet_os_data.txt", serialized)
         } catch (e: Exception) {
@@ -63,11 +84,22 @@ object ClosetRepository {
         }
     }
 
+    private data class ParsedData(
+        val garments: List<Garment>,
+        val taste: UserTaste,
+        val wearHistory: List<WearEvent>,
+        val tripPlans: List<TripPlan>,
+        val outfits: List<Outfit>,
+        val collections: List<LookbookCollection>
+    )
+
     private fun serializeData(
         garments: List<Garment>,
         taste: UserTaste,
         history: List<WearEvent>,
-        trips: List<TripPlan>
+        trips: List<TripPlan>,
+        outfits: List<Outfit>,
+        collections: List<LookbookCollection>
     ): String {
         val sb = StringBuilder()
         
@@ -97,15 +129,36 @@ object ClosetRepository {
         for (t in trips) {
             sb.append("${t.id}|${t.destination}|${t.startDate}|${t.endDate}|${t.tempLow}|${t.tempHigh}|${t.weatherCondition}\n")
         }
+
+        sb.append("[OUTFITS]\n")
+        for (o in outfits) {
+            val garmentIds = o.garments.joinToString(",") { it.id }
+            val tagsStr = o.tags.joinToString(",")
+            val bestForStr = o.bestFor.joinToString(",")
+            sb.append(
+                "${o.id}|$garmentIds|${o.name}|${o.compatibilityScore}|${o.colorHarmonyScore}|" +
+                    "${o.formalityCoherence}|${o.overallScore}|$tagsStr|${o.reason}|${o.wornCount}|" +
+                    "${o.avgCostPerWear}|${o.temperatureC}|${o.isFavorite}|${o.isSaved}|${o.isAiGenerated}|" +
+                    "${o.lastWornMs ?: ""}|$bestForStr|${o.aiNote}\n"
+            )
+        }
+
+        sb.append("[COLLECTIONS]\n")
+        for (c in collections) {
+            val outfitIdsStr = c.outfitIds.joinToString(",")
+            sb.append("${c.id}|${c.name}|$outfitIdsStr|${c.isUserCreated}\n")
+        }
         
         return sb.toString()
     }
 
-    private fun deserializeData(content: String): Triple<List<Garment>, UserTaste, Pair<List<WearEvent>, List<TripPlan>>> {
+    private fun deserializeData(content: String): ParsedData {
         val garmentsList = mutableListOf<Garment>()
         var taste = UserTaste()
         val historyList = mutableListOf<WearEvent>()
         val tripsList = mutableListOf<TripPlan>()
+        val outfitsList = mutableListOf<Outfit>()
+        val collectionsList = mutableListOf<LookbookCollection>()
         
         var currentSection = ""
         val lines = content.split("\n")
@@ -187,12 +240,55 @@ object ClosetRepository {
                             tripsList.add(TripPlan(id, destination, startDate, endDate, tempLow, tempHigh, weatherCondition))
                         }
                     }
+                    "[OUTFITS]" -> {
+                        if (parts.size >= 16) {
+                            val outfitId = parts[0]
+                            val garmentIds = if (parts[1].isEmpty()) emptyList() else parts[1].split(",")
+                            val outfitGarments = garmentIds.mapNotNull { id -> garmentsList.find { it.id == id } }
+                            if (outfitGarments.isNotEmpty()) {
+                                outfitsList.add(
+                                    Outfit(
+                                        id = outfitId,
+                                        garments = outfitGarments,
+                                        name = parts[2],
+                                        compatibilityScore = parts[3].toFloat(),
+                                        colorHarmonyScore = parts[4].toFloat(),
+                                        formalityCoherence = parts[5].toFloat(),
+                                        overallScore = parts[6].toFloat(),
+                                        tags = if (parts[7].isEmpty()) emptyList() else parts[7].split(","),
+                                        reason = parts[8],
+                                        wornCount = parts[9].toInt(),
+                                        avgCostPerWear = parts[10].toDouble(),
+                                        temperatureC = parts[11].toFloat(),
+                                        isFavorite = parts[12].toBoolean(),
+                                        isSaved = parts[13].toBoolean(),
+                                        isAiGenerated = parts[14].toBoolean(),
+                                        lastWornMs = parts[15].ifEmpty { null }?.toLongOrNull(),
+                                        bestFor = if (parts.size >= 17 && parts[16].isNotEmpty()) parts[16].split(",") else emptyList(),
+                                        aiNote = if (parts.size >= 18) parts[17] else ""
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    "[COLLECTIONS]" -> {
+                        if (parts.size >= 4) {
+                            collectionsList.add(
+                                LookbookCollection(
+                                    id = parts[0],
+                                    name = parts[1],
+                                    outfitIds = if (parts[2].isEmpty()) emptyList() else parts[2].split(","),
+                                    isUserCreated = parts[3].toBoolean()
+                                )
+                            )
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
-        return Triple(garmentsList, taste, Pair(historyList, tripsList))
+        return ParsedData(garmentsList, taste, historyList, tripsList, outfitsList, collectionsList)
     }
 
     fun updateTaste(taste: UserTaste) {
@@ -206,9 +302,15 @@ object ClosetRepository {
         )
     }
 
-    fun saveLookbookOutfit(garments: List<Garment>): Outfit {
-        val outfit = scoreLookbookOutfit(garments)
+    fun saveLookbookOutfit(garments: List<Garment>, isAiGenerated: Boolean = false): Outfit {
+        val outfit = enrichOutfit(scoreLookbookOutfit(garments).copy(isAiGenerated = isAiGenerated, isSaved = true))
+        _lookbookOutfits.value = _lookbookOutfits.value + outfit
+        updateTasteFromOutfit(garments)
+        saveData()
+        return outfit
+    }
 
+    private fun updateTasteFromOutfit(garments: List<Garment>, blendWeight: Float = 0.15f) {
         val currentTaste = _userTaste.value
         val currentVector = currentTaste.tasteVector
         val outfitCentroid = FloatArray(512)
@@ -222,12 +324,246 @@ object ClosetRepository {
         }
 
         val blendedVector = FloatArray(512) { i ->
-            (currentVector.getOrElse(i) { 0f } * 0.85f) + (outfitCentroid[i] * 0.15f)
+            (currentVector.getOrElse(i) { 0f } * (1f - blendWeight)) + (outfitCentroid[i] * blendWeight)
         }
 
         _userTaste.value = currentTaste.copy(tasteVector = blendedVector)
+    }
+
+    fun recordStyleInteraction(outfit: Outfit, interaction: String) {
+        val garments = outfit.garments
+        val currentTaste = _userTaste.value
+
+        val preferredColors = currentTaste.preferredStyles.toMutableList()
+        val occasions = currentTaste.occasions.toMutableList()
+        val preferredFits = currentTaste.preferredFits.toMutableList()
+
+        when (interaction) {
+            "favorite", "save", "wear" -> {
+                garments.map { it.colorName }.distinct().forEach { color ->
+                    if (!preferredColors.contains(color)) preferredColors.add(color)
+                }
+                outfit.bestFor.forEach { occasion ->
+                    if (!occasions.contains(occasion)) occasions.add(occasion)
+                }
+                garments.map { it.fit }.distinct().forEach { fit ->
+                    if (!preferredFits.contains(fit)) preferredFits.add(fit)
+                }
+                updateTasteFromOutfit(garments, if (interaction == "favorite") 0.2f else 0.12f)
+            }
+        }
+
+        _userTaste.value = currentTaste.copy(
+            preferredStyles = preferredColors.takeLast(12),
+            occasions = occasions.takeLast(10),
+            preferredFits = preferredFits.takeLast(8)
+        )
         saveData()
-        return outfit
+    }
+
+    fun toggleOutfitFavorite(outfitId: String) {
+        _lookbookOutfits.value = _lookbookOutfits.value.map { outfit ->
+            if (outfit.id == outfitId) {
+                val updated = outfit.copy(isFavorite = !outfit.isFavorite)
+                if (updated.isFavorite) recordStyleInteraction(updated, "favorite")
+                updated
+            } else outfit
+        }
+        saveData()
+    }
+
+    fun toggleOutfitSaved(outfitId: String) {
+        _lookbookOutfits.value = _lookbookOutfits.value.map { outfit ->
+            if (outfit.id == outfitId) {
+                val updated = outfit.copy(isSaved = !outfit.isSaved)
+                if (updated.isSaved) recordStyleInteraction(updated, "save")
+                updated
+            } else outfit
+        }
+        saveData()
+    }
+
+    fun wearOutfitToday(outfitId: String) {
+        val outfit = _lookbookOutfits.value.find { it.id == outfitId } ?: return
+        logWear(outfit, loved = false)
+        _lookbookOutfits.value = _lookbookOutfits.value.map { o ->
+            if (o.id == outfitId) {
+                o.copy(
+                    wornCount = o.wornCount + 1,
+                    lastWornMs = getEpochTimeMillis()
+                )
+            } else o
+        }
+        recordStyleInteraction(outfit, "wear")
+        saveData()
+    }
+
+    fun getRecommendedOutfits(limit: Int = 6): List<Outfit> {
+        ensureLookbookPopulated()
+        return _lookbookOutfits.value
+            .sortedByDescending { it.overallScore }
+            .take(limit)
+    }
+
+    fun getRecentlyWornOutfits(limit: Int = 6): List<Outfit> {
+        return _lookbookOutfits.value
+            .filter { it.lastWornMs != null }
+            .sortedByDescending { it.lastWornMs }
+            .take(limit)
+    }
+
+    fun getFavoriteOutfits(limit: Int = 6): List<Outfit> {
+        return _lookbookOutfits.value.filter { it.isFavorite }.take(limit)
+    }
+
+    fun getSavedOutfits(limit: Int = 12): List<Outfit> {
+        return _lookbookOutfits.value.filter { it.isSaved }.take(limit)
+    }
+
+    fun getAiGeneratedOutfits(limit: Int = 6): List<Outfit> {
+        return _lookbookOutfits.value.filter { it.isAiGenerated }.take(limit)
+    }
+
+    fun getTrendingOutfits(limit: Int = 6): List<Outfit> {
+        return _lookbookOutfits.value
+            .sortedByDescending { it.wornCount * 0.6f + it.overallScore * 0.4f }
+            .take(limit)
+    }
+
+    fun searchOutfits(query: String): List<Outfit> {
+        if (query.isBlank()) return _lookbookOutfits.value
+        val term = query.lowercase()
+        return _lookbookOutfits.value.filter { outfit ->
+            outfit.name.lowercase().contains(term) ||
+                outfit.tags.any { it.lowercase().contains(term) } ||
+                outfit.bestFor.any { it.lowercase().contains(term) } ||
+                outfit.garments.any { g ->
+                    g.subcategory.lowercase().contains(term) ||
+                        g.colorName.lowercase().contains(term) ||
+                        g.brand.lowercase().contains(term)
+                }
+        }
+    }
+
+    fun getOutfitsForCollection(collectionId: String): List<Outfit> {
+        val collection = _collections.value.find { it.id == collectionId } ?: return emptyList()
+        return collection.outfitIds.mapNotNull { id -> _lookbookOutfits.value.find { it.id == id } }
+    }
+
+    fun getOutfitsForOccasion(occasion: String, limit: Int = 6): List<Outfit> {
+        return _lookbookOutfits.value.filter { outfit ->
+            outfit.bestFor.any { it.equals(occasion, ignoreCase = true) } ||
+                outfit.tags.any { it.equals(occasion, ignoreCase = true) } ||
+                outfit.name.contains(occasion, ignoreCase = true)
+        }.take(limit)
+    }
+
+    fun createCollection(name: String): LookbookCollection {
+        val collection = LookbookCollection(name = name, isUserCreated = true)
+        _collections.value = _collections.value + collection
+        saveData()
+        return collection
+    }
+
+    fun getOutfitById(id: String): Outfit? = _lookbookOutfits.value.find { it.id == id }
+
+    private fun ensureLookbookPopulated() {
+        if (_lookbookOutfits.value.isEmpty() && _garments.value.isNotEmpty()) {
+            seedLookbookData()
+        }
+    }
+
+    private fun enrichOutfit(outfit: Outfit): Outfit {
+        val avgCpw = if (outfit.garments.isNotEmpty()) {
+            outfit.garments.map { it.costPerWear }.average()
+        } else 0.0
+        val totalWorn = outfit.garments.sumOf { it.wearCount }
+        val avgFormality = outfit.garments.map { it.formalityScore }.average().toFloat()
+        val name = when {
+            avgFormality >= 0.75f -> "Formal"
+            avgFormality >= 0.55f -> "Business Casual"
+            avgFormality >= 0.35f -> "Smart Casual"
+            else -> "Weekend Casual"
+        }
+        val bestFor = when {
+            avgFormality >= 0.75f -> listOf("Office", "Meetings", "Formal")
+            avgFormality >= 0.55f -> listOf("Office", "Meetings", "Coffee")
+            avgFormality >= 0.35f -> listOf("Weekend", "Dinner", "Travel")
+            else -> listOf("Gym", "Casual", "Travel")
+        }
+        val daysSinceWorn = outfit.garments.maxOfOrNull { g ->
+            val lastEvent = _wearHistory.value.lastOrNull { g.id in it.garmentsWornIds }
+            if (lastEvent != null) ((getEpochTimeMillis() - lastEvent.date) / (24 * 60 * 60 * 1000)).toInt()
+            else 28
+        } ?: 28
+        val aiNote = if (daysSinceWorn >= 14) {
+            "You haven't worn this combination in $daysSinceWorn days."
+        } else outfit.aiNote
+
+        return outfit.copy(
+            name = if (outfit.name == "Custom Lookbook Outfit" || outfit.name == "Lookbook Outfit") name else outfit.name,
+            avgCostPerWear = avgCpw,
+            wornCount = if (outfit.wornCount > 0) outfit.wornCount else totalWorn / outfit.garments.size.coerceAtLeast(1),
+            bestFor = if (outfit.bestFor.isEmpty()) bestFor else outfit.bestFor,
+            aiNote = aiNote.ifEmpty { outfit.reason.take(80) }
+        )
+    }
+
+    fun seedLookbookData() {
+        if (_garments.value.isEmpty()) return
+
+        val generated = buildList {
+            addAll(generateRecommendations(74f, "Office").map { enrichOutfit(it.copy(tags = listOf("Office"))) })
+            addAll(generateRecommendations(68f, "Weekend").map { enrichOutfit(it.copy(tags = listOf("Weekend"))) })
+            addAll(generateRecommendations(72f, "Dinner").map { enrichOutfit(it.copy(tags = listOf("Dinner"))) })
+            addAll(generateRecommendations(65f, "Travel").map { enrichOutfit(it.copy(tags = listOf("Travel"))) })
+        }.distinctBy { it.garments.map { g -> g.id }.sorted().joinToString() }
+
+        val aiOutfits = generated.take(2).map {
+            enrichOutfit(it.copy(isAiGenerated = true, name = "AI · ${it.name}"))
+        }
+        val withMeta = generated.mapIndexed { index, outfit ->
+            enrichOutfit(
+                outfit.copy(
+                    isFavorite = index == 0,
+                    isSaved = index < 3
+                )
+            )
+        }
+
+        val allOutfits = (withMeta + aiOutfits)
+            .distinctBy { it.garments.map { g -> g.id }.sorted().joinToString() }
+
+        _lookbookOutfits.value = allOutfits
+
+        val collectionDefs = listOf(
+            "Office" to listOf("Office", "Business"),
+            "Summer" to listOf("Summer", "Weekend"),
+            "Travel" to listOf("Travel"),
+            "Minimalist" to listOf("Minimal", "Smart Casual"),
+            "Date Night" to listOf("Dinner", "Date"),
+            "Gym" to listOf("Gym", "Casual"),
+            "Weekend" to listOf("Weekend"),
+            "Vacation" to listOf("Travel", "Summer"),
+            "Business" to listOf("Office", "Business"),
+            "Airport" to listOf("Travel"),
+            "Formal" to listOf("Formal"),
+            "Minimal" to listOf("Minimal"),
+            "Monochrome" to listOf("Minimal"),
+            "Wedding" to listOf("Wedding", "Formal")
+        )
+
+        _collections.value = collectionDefs.map { (name, tags) ->
+            val matchingIds = allOutfits.filter { outfit ->
+                tags.any { tag ->
+                    outfit.tags.any { it.contains(tag, ignoreCase = true) } ||
+                        outfit.name.contains(tag, ignoreCase = true) ||
+                        outfit.bestFor.any { it.contains(tag, ignoreCase = true) }
+                }
+            }.map { it.id }.distinct()
+            LookbookCollection(name = name, outfitIds = matchingIds)
+        }
+        saveData()
     }
 
     fun queueIngestionItems(urls: List<String>) {
