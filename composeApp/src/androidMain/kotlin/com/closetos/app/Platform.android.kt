@@ -47,6 +47,10 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 
+private const val DEFAULT_BACKEND_URL = "https://closetos.adboardtools.com"
+
+private fun resolveBackendBaseUrl(): String = DEFAULT_BACKEND_URL
+
 actual object PlatformStorage {
     var applicationContext: Context? = null
         private set
@@ -193,14 +197,7 @@ private suspend fun uploadImageToBackend(
             val file = File(imagePath)
             if (!file.exists()) return@withContext null
 
-            val savedIp = PlatformStorage.loadString("backend_ip")?.trim() ?: "http://10.0.2.2:8000"
-            val baseUrl = if (savedIp.startsWith("http://") || savedIp.startsWith("https://")) {
-                savedIp
-            } else {
-                "http://$savedIp"
-            }
-            
-            val startUrl = "${baseUrl.trimEnd('/')}/digitize/start"
+            val startUrl = "${resolveBackendBaseUrl()}/digitize/start"
             println("Ingestion: Starting extraction job at: $startUrl")
             val url = java.net.URL(startUrl)
             connection = url.openConnection() as java.net.HttpURLConnection
@@ -252,7 +249,7 @@ private suspend fun uploadImageToBackend(
                 delay(1000)
                 retryCount++
 
-                val statusUrl = "${baseUrl.trimEnd('/')}/digitize/jobs/$jobId"
+                val statusUrl = "${resolveBackendBaseUrl()}/digitize/jobs/$jobId"
                 val pollUrl = java.net.URL(statusUrl)
                 var pollConn: java.net.HttpURLConnection? = null
                 try {
@@ -648,7 +645,7 @@ actual suspend fun fetchWeatherInfo(): WeatherInfo = withContext(Dispatchers.IO)
     fetchWeatherForCoordinates(51.5074, -0.1278, "Location unavailable")
 }
 
-actual fun defaultBackendUrl(): String = "http://10.0.2.2:8000"
+actual fun defaultBackendUrl(): String = DEFAULT_BACKEND_URL
 
 actual fun getEpochTimeMillis(): Long = System.currentTimeMillis()
 
@@ -682,14 +679,7 @@ actual suspend fun runGarmentDetection(path: String): List<com.closetos.app.data
             val file = File(path)
             if (!file.exists()) return@withContext null
 
-            val savedIp = PlatformStorage.loadString("backend_ip")?.trim() ?: "https://closetos.adboardtools.com"
-            val baseUrl = if (savedIp.startsWith("http://") || savedIp.startsWith("https://")) {
-                savedIp
-            } else {
-                "http://$savedIp"
-            }
-            
-            val detectUrl = "${baseUrl.trimEnd('/')}/yolo-world/detect"
+            val detectUrl = "${resolveBackendBaseUrl()}/yolo-world/detect"
             val url = java.net.URL(detectUrl)
             connection = url.openConnection() as java.net.HttpURLConnection
             val boundary = "===Boundary-${System.currentTimeMillis()}==="
@@ -772,14 +762,7 @@ actual suspend fun normalizeGarmentCrop(
     return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         var normalizeConn: java.net.HttpURLConnection? = null
         try {
-            val savedIp = PlatformStorage.loadString("backend_ip")?.trim() ?: "http://10.0.2.2:8000"
-            val baseUrl = if (savedIp.startsWith("http://") || savedIp.startsWith("https://")) {
-                savedIp
-            } else {
-                "http://$savedIp"
-            }
-
-            val normalizeUrl = "${baseUrl.trimEnd('/')}/yolo-world/gpt-normalize"
+            val normalizeUrl = "${resolveBackendBaseUrl()}/yolo-world/gpt-normalize"
             val url1 = java.net.URL(normalizeUrl)
             normalizeConn = url1.openConnection() as java.net.HttpURLConnection
             normalizeConn.doOutput = true
@@ -828,14 +811,7 @@ actual suspend fun finalizeGarment(
     return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         var finalizeConn: java.net.HttpURLConnection? = null
         try {
-            val savedIp = PlatformStorage.loadString("backend_ip")?.trim() ?: "http://10.0.2.2:8000"
-            val baseUrl = if (savedIp.startsWith("http://") || savedIp.startsWith("https://")) {
-                savedIp
-            } else {
-                "http://$savedIp"
-            }
-
-            val finalizeUrl = "${baseUrl.trimEnd('/')}/yolo-world/finalize"
+            val finalizeUrl = "${resolveBackendBaseUrl()}/yolo-world/finalize"
             val url2 = java.net.URL(finalizeUrl)
             finalizeConn = url2.openConnection() as java.net.HttpURLConnection
             finalizeConn.doOutput = true
@@ -965,15 +941,6 @@ actual suspend fun saveBase64ImageToFile(base64: String, prefix: String): String
             e.printStackTrace()
             null
         }
-    }
-}
-
-private fun resolveBackendBaseUrl(): String {
-    val savedIp = PlatformStorage.loadString("backend_ip")?.trim() ?: "http://10.0.2.2:8000"
-    return if (savedIp.startsWith("http://") || savedIp.startsWith("https://")) {
-        savedIp.trimEnd('/')
-    } else {
-        "http://$savedIp".trimEnd('/')
     }
 }
 

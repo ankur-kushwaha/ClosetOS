@@ -59,10 +59,6 @@ fun App() {
         }
         var activeRoute by remember { mutableStateOf(Screen.Ootd.route) }
         var showNotificationInbox by remember { mutableStateOf(false) }
-        var ipConfigText by remember {
-            mutableStateOf(PlatformStorage.loadString("backend_ip") ?: defaultBackendUrl())
-        }
-        var showDevOptions by remember { mutableStateOf(false) }
 
         val activeBanner by NotificationCenter.activeBanner.collectAsState()
         val allNotifications by NotificationCenter.notifications.collectAsState()
@@ -223,59 +219,6 @@ fun App() {
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // Backend Server URL configuration
-                        OutlinedTextField(
-                            value = ipConfigText,
-                            onValueChange = { ipConfigText = it },
-                            label = { Text("Backend Server URL", color = TextMuted, fontSize = 10.sp) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = AccentGold,
-                                unfocusedBorderColor = AccentGold.copy(alpha = 0.2f),
-                                focusedLabelColor = AccentGold,
-                                cursorColor = AccentGold,
-                                focusedTextColor = TextLight,
-                                unfocusedTextColor = TextLight
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Button(
-                            onClick = {
-                                val trimmed = ipConfigText.trim()
-                                PlatformStorage.saveString("backend_ip", trimmed)
-                                showToast("Backend URL updated to $trimmed")
-                                scope.launch {
-                                    drawerState.close()
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentGold),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Save Server IP", color = ObsidianBg, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Reset Application State
-                        Button(
-                            onClick = {
-                                hasCompletedOnboarding = false
-                                PlatformStorage.saveString("has_completed_onboarding", "false")
-                                showToast("Data Reset. Quiz onboarding required.")
-                                scope.launch {
-                                    drawerState.close()
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.15f)),
-                            modifier = Modifier.fillMaxWidth().border(0.5.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(100))
-                        ) {
-                            Text("Reset Application Data", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                        }
                     }
                 }
             }
@@ -295,7 +238,7 @@ fun App() {
                             },
                             navigationIcon = {
                                 IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                    Icon(Icons.Default.Settings, contentDescription = "Debug Drawer", tint = AccentGold)
+                                    Icon(Icons.Default.Settings, contentDescription = "Settings", tint = AccentGold)
                                 }
                             },
                             actions = {
