@@ -135,6 +135,13 @@ data class NormalizationResult(
     val provider: String = "unknown"
 )
 
+data class TryOnResult(
+    val imageBase64: String,
+    val provider: String = "gemini-3.1-flash-lite-image",
+    val imagePath: String? = null,
+    val fromCache: Boolean = false
+)
+
 data class IngestionItem(
     val id: String = generateUUID(),
     val originalImageUrl: String,

@@ -27,11 +27,11 @@ import androidx.compose.ui.unit.sp
 import com.closetos.app.*
 import com.closetos.app.data.model.Outfit
 import com.closetos.app.data.repository.ClosetRepository
+import com.closetos.app.data.repository.TryOnService
 import com.closetos.app.ui.components.ElegantButton
 import com.closetos.app.ui.components.GlassmorphicCard
 import com.closetos.app.ui.components.TagChip
 import com.closetos.app.ui.theme.*
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -73,14 +73,30 @@ fun OotdScreen() {
     var wearLogged by remember { mutableStateOf(false) }
     var loveLogged by remember { mutableStateOf(false) }
 
-    // Reroll state
+    // Reroll / try-on state
     var isRerolling by remember { mutableStateOf(false) }
     var showPremiumRerollDialog by remember { mutableStateOf(false) }
+    var tryOnImagePath by remember { mutableStateOf<String?>(null) }
+    var isTryOnLoading by remember { mutableStateOf(false) }
 
     // Reset feedback state on outfit index change
     LaunchedEffect(selectedOutfitIndex) {
         wearLogged = false
         loveLogged = false
+    }
+
+    LaunchedEffect(activeOutfit?.id) {
+        val outfit = activeOutfit ?: return@LaunchedEffect
+        tryOnImagePath = null
+        val cached = ClosetRepository.getTryOnImagePath(outfit.id)
+        if (cached != null) {
+            tryOnImagePath = cached
+            return@LaunchedEffect
+        }
+        isTryOnLoading = true
+        val result = TryOnService.renderOutfit(outfit, forceRefresh = false)
+        isTryOnLoading = false
+        tryOnImagePath = result?.imagePath
     }
 
     Column(
@@ -183,7 +199,7 @@ fun OotdScreen() {
                 .weight(1f)
                 .fillMaxWidth()
         ) {
-            if (isRerolling) {
+            if (isRerolling || isTryOnLoading) {
                 Column(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.Center,
@@ -192,13 +208,13 @@ fun OotdScreen() {
                     CircularProgressIndicator(color = AccentGold, strokeWidth = 4.dp, modifier = Modifier.size(60.dp))
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = "Running IDM-VTON model on Hetzner GPU...",
+                        text = "Rendering with Gemini 3.1 Flash Lite Image…",
                         fontFamily = OutfitFont,
                         fontSize = 14.sp,
                         color = AccentGold
                     )
                     Text(
-                        text = "Pre-generating silhouette overlay...",
+                        text = "Compositing outfit onto your digital twin…",
                         fontFamily = OutfitFont,
                         fontSize = 11.sp,
                         color = TextMuted
@@ -244,7 +260,16 @@ fun OotdScreen() {
                             }
                         }
 
-                        // Simulated avatar rendering
+                        // Try-on render or garment fallback
+                        val displayTryOnPath = tryOnImagePath ?: ""
+                        val tryOnBitmap = rememberImageBitmap(displayTryOnPath)
+                        if (displayTryOnPath.isNotEmpty() && tryOnBitmap != null) {
+                            Image(
+                                bitmap = tryOnBitmap,
+                                contentDescription = "OOTD try-on render",
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
                         Column(
                             modifier = Modifier.fillMaxSize(),
                             verticalArrangement = Arrangement.Center,
@@ -306,6 +331,7 @@ fun OotdScreen() {
                                     }
                                 }
                             }
+                        }
                         }
                     }
 
@@ -492,14 +518,14 @@ fun OotdScreen() {
             containerColor = CharcoalSurface,
             title = {
                 Text(
-                    text = "On-Demand GPU Re-render",
+                    text = "On-Demand Try-On Re-render",
                     fontFamily = PlayfairFont,
                     color = AccentGold
                 )
             },
             text = {
                 Text(
-                    text = "Generating a custom lookbook render outside the nightly batch cache consumes 1 Premium GPU Token. Continue?",
+                    text = "Generating a custom try-on render outside the nightly batch cache uses Gemini 3.1 Flash Lite Image. Continue?",
                     fontFamily = OutfitFont,
                     color = TextLight
                 )
@@ -513,15 +539,20 @@ fun OotdScreen() {
             },
             confirmButton = {
                 ElegantButton(
-                    text = "Render (Token -1)",
+                    text = "Render",
                     onClick = {
                         showPremiumRerollDialog = false
+                        val outfit = activeOutfit ?: return@ElegantButton
                         isRerolling = true
                         scope.launch {
-                            delay(3000) // Simulate Hetzner render delay
+                            val result = TryOnService.renderOutfit(outfit, forceRefresh = true)
                             isRerolling = false
-                            showToast("GPU Try-on successful! New outfit cached.")
-                            selectedOutfitIndex = (selectedOutfitIndex + 1) % cachedOutfits.size
+                            if (result?.imagePath != null) {
+                                tryOnImagePath = result.imagePath
+                                showToast("Try-on render complete!")
+                            } else {
+                                showToast("Try-on render failed")
+                            }
                         }
                     }
                 )

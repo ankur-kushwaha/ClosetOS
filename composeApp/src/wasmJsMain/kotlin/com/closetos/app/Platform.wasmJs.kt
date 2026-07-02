@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.ImageBitmap
 import com.closetos.app.data.model.Garment
 import com.closetos.app.data.model.TravelCapsulePlan
+import com.closetos.app.data.model.TryOnResult
 import kotlinx.browser.window
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
@@ -337,6 +338,16 @@ actual suspend fun cropImageToBase64(
 ): String? = null
 
 actual suspend fun saveBase64ImageToFile(base64: String, prefix: String): String? = null
+
+actual fun getDigitalTwinSelfiePath(): String? = null
+
+actual fun getLastTryOnError(): String? = null
+
+actual suspend fun renderTryOn(
+    personImagePath: String,
+    garments: List<Garment>,
+    outfitId: String?
+): TryOnResult? = null
 
 actual suspend fun generateTravelCapsule(
     destination: String,

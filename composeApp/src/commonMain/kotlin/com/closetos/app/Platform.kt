@@ -6,6 +6,7 @@ import com.closetos.app.data.model.Garment
 import com.closetos.app.data.model.NormalizationResult
 import com.closetos.app.data.model.TravelCapsulePlan
 import com.closetos.app.data.model.TravelDayOutfit
+import com.closetos.app.data.model.TryOnResult
 
 expect object PlatformStorage {
     fun saveString(key: String, value: String)
@@ -83,6 +84,17 @@ expect suspend fun cropImageToBase64(
 ): String?
 
 expect suspend fun saveBase64ImageToFile(base64: String, prefix: String): String?
+
+expect fun getDigitalTwinSelfiePath(): String?
+
+expect suspend fun renderTryOn(
+    personImagePath: String,
+    garments: List<Garment>,
+    outfitId: String? = null
+): TryOnResult?
+
+/** Last error message from a failed try-on API call, if any. */
+expect fun getLastTryOnError(): String?
 
 expect suspend fun generateTravelCapsule(
     destination: String,

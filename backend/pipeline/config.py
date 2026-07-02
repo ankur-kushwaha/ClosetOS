@@ -21,6 +21,12 @@ NORMALIZATION_PROVIDER = _env("NORMALIZATION_PROVIDER", "none")
 
 OPENAI_API_KEY = _env("OPENAI_API_KEY", "")
 BFL_API_KEY = _env("BFL_API_KEY", "")
+GEMINI_API_KEY = _env("GEMINI_API_KEY", "") or _env("GOOGLE_API_KEY", "")
+TRY_ON_MODEL = _env("TRY_ON_MODEL", "gemini-3.1-flash-lite-image")
+# "ai_studio" (default) or "vertex" — use vertex to bypass AI Studio image quota bug
+TRY_ON_PROVIDER = _env("TRY_ON_PROVIDER", "ai_studio").lower()
+GOOGLE_CLOUD_PROJECT = _env("GOOGLE_CLOUD_PROJECT", "adboard-booking")
+GOOGLE_CLOUD_LOCATION = _env("GOOGLE_CLOUD_LOCATION", "us-central1")
 
 NORMALIZATION_PROMPT = (
     "Create a professional e-commerce product photograph of this exact garment. "

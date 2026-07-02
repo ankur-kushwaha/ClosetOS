@@ -36,6 +36,7 @@ import com.closetos.app.data.model.LaundryStatus
 import com.closetos.app.data.model.NormalizationResult
 import com.closetos.app.data.model.TravelCapsulePlan
 import com.closetos.app.data.model.TravelDayOutfit
+import com.closetos.app.data.model.TryOnResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -1084,5 +1085,103 @@ actual fun decodeBase64ToBitmap(base64: String): ImageBitmap? {
     } catch (e: Exception) {
         e.printStackTrace()
         null
+    }
+}
+
+actual fun getDigitalTwinSelfiePath(): String? {
+    val context = PlatformStorage.applicationContext ?: return null
+    val file = File(context.filesDir, "digital_twin_selfie.jpg")
+    return if (file.exists()) file.absolutePath else null
+}
+
+private fun fileToBase64(path: String): String? {
+    return try {
+        val file = File(path)
+        if (!file.exists()) return null
+        Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
+
+private var lastTryOnError: String? = null
+
+actual fun getLastTryOnError(): String? = lastTryOnError
+
+actual suspend fun renderTryOn(
+    personImagePath: String,
+    garments: List<Garment>,
+    outfitId: String?
+): TryOnResult? {
+    return withContext(Dispatchers.IO) {
+        lastTryOnError = null
+        var connection: java.net.HttpURLConnection? = null
+        try {
+            val personBase64 = fileToBase64(personImagePath) ?: return@withContext null
+
+            val garmentsArray = org.json.JSONArray()
+            for (g in garments) {
+                val imagePath = g.straightenedImageUrl.ifBlank { g.imageUrl }
+                val imageBase64 = fileToBase64(imagePath) ?: continue
+                val gObj = org.json.JSONObject()
+                gObj.put("id", g.id)
+                gObj.put("category", g.category)
+                gObj.put("subcategory", g.subcategory)
+                gObj.put("colorName", g.colorName)
+                gObj.put("image_base64", imageBase64)
+                garmentsArray.put(gObj)
+            }
+
+            if (garmentsArray.length() == 0) {
+                return@withContext null
+            }
+
+            val payload = org.json.JSONObject()
+            payload.put("person_image_base64", personBase64)
+            payload.put("garments", garmentsArray)
+            if (outfitId != null) {
+                payload.put("outfit_id", outfitId)
+            }
+
+            val url = java.net.URL("${resolveBackendBaseUrl()}/try-on/render")
+            connection = url.openConnection() as java.net.HttpURLConnection
+            connection.doOutput = true
+            connection.doInput = true
+            connection.useCaches = false
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 30_000
+            connection.readTimeout = 180_000
+            connection.setRequestProperty("Content-Type", "application/json")
+
+            connection.outputStream.use { out ->
+                out.write(payload.toString().toByteArray(charset("UTF-8")))
+                out.flush()
+            }
+
+            val code = connection.responseCode
+            if (code != java.net.HttpURLConnection.HTTP_OK) {
+                val err = connection.errorStream?.bufferedReader()?.use { it.readText() }
+                lastTryOnError = try {
+                    org.json.JSONObject(err ?: "").optString("detail", err ?: "Try-on failed ($code)")
+                } catch (_: Exception) {
+                    err ?: "Try-on failed ($code)"
+                }
+                println("Try-on failed ($code): $lastTryOnError")
+                return@withContext null
+            }
+
+            val response = connection.inputStream.bufferedReader().use { it.readText() }
+            val root = org.json.JSONObject(response)
+            TryOnResult(
+                imageBase64 = root.getString("image_base64"),
+                provider = root.optString("provider", "gemini-3.1-flash-lite-image")
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        } finally {
+            connection?.disconnect()
+        }
     }
 }

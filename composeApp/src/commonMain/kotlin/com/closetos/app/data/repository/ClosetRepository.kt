@@ -37,7 +37,34 @@ object ClosetRepository {
         "Minimal", "Streetwear", "Business", "Date", "Wedding", "Party"
     )
 
+    private val _tryOnCache = MutableStateFlow<Map<String, String>>(emptyMap())
+
+    fun getTryOnImagePath(outfitId: String): String? = _tryOnCache.value[outfitId]
+
+    fun cacheTryOnImage(outfitId: String, imagePath: String) {
+        _tryOnCache.value = _tryOnCache.value + (outfitId to imagePath)
+        saveTryOnCache()
+    }
+
+    private fun saveTryOnCache() {
+        val serialized = _tryOnCache.value.entries.joinToString("\n") { "${it.key}|${it.value}" }
+        PlatformStorage.saveString("tryon_cache.txt", serialized)
+    }
+
+    private fun loadTryOnCache() {
+        val saved = PlatformStorage.loadString("tryon_cache.txt") ?: return
+        val map = saved.lines()
+            .filter { it.contains("|") }
+            .mapNotNull { line ->
+                val parts = line.split("|", limit = 2)
+                if (parts.size == 2) parts[0] to parts[1] else null
+            }
+            .toMap()
+        _tryOnCache.value = map
+    }
+
     fun init() {
+        loadTryOnCache()
         loadData()
     }
 

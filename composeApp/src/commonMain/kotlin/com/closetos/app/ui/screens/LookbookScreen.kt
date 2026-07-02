@@ -60,6 +60,8 @@ private fun timeGreeting(): String {
 fun LookbookScreen() {
     var navStack by remember { mutableStateOf(listOf<LookbookNav>(LookbookNav.Landing)) }
     val current = navStack.last()
+    var tryOnOutfit by remember { mutableStateOf<Outfit?>(null) }
+    val onTryOn: (Outfit) -> Unit = { tryOnOutfit = it }
 
     fun push(destination: LookbookNav) {
         navStack = navStack + destination
@@ -100,18 +102,21 @@ fun LookbookScreen() {
             onCollection = { push(LookbookNav.Collection(it)) },
             onOutfit = { push(LookbookNav.OutfitDetail(it.id)) },
             onSearch = { push(LookbookNav.Search) },
-            onGenerate = { push(LookbookNav.Builder) }
+            onGenerate = { push(LookbookNav.Builder) },
+            onTryOn = onTryOn
         )
         is LookbookNav.Section -> LookbookSectionScreen(
             section = screen.type,
             title = screen.title,
             onBack = { pop() },
-            onOutfit = { push(LookbookNav.OutfitDetail(it.id)) }
+            onOutfit = { push(LookbookNav.OutfitDetail(it.id)) },
+            onTryOn = onTryOn
         )
         is LookbookNav.Collection -> LookbookCollectionScreen(
             collection = screen.collection,
             onBack = { pop() },
-            onOutfit = { push(LookbookNav.OutfitDetail(it.id)) }
+            onOutfit = { push(LookbookNav.OutfitDetail(it.id)) },
+            onTryOn = onTryOn
         )
         is LookbookNav.OutfitDetail -> {
             val outfit = ClosetRepository.getOutfitById(screen.outfitId)
@@ -119,7 +124,8 @@ fun LookbookScreen() {
                 OutfitDetailScreen(
                     outfit = outfit,
                     onBack = { pop() },
-                    onEdit = { push(LookbookNav.Builder) }
+                    onEdit = { push(LookbookNav.Builder) },
+                    onTryOn = { onTryOn(outfit) }
                 )
             } else {
                 LaunchedEffect(Unit) { pop() }
@@ -127,9 +133,14 @@ fun LookbookScreen() {
         }
         LookbookNav.Search -> LookbookSearchScreen(
             onBack = { pop() },
-            onOutfit = { push(LookbookNav.OutfitDetail(it.id)) }
+            onOutfit = { push(LookbookNav.OutfitDetail(it.id)) },
+            onTryOn = onTryOn
         )
         LookbookNav.Builder -> OutfitBuilderScreen(onBack = { pop() })
+    }
+
+    tryOnOutfit?.let { outfit ->
+        TryOnDialog(outfit = outfit, onDismiss = { tryOnOutfit = null })
     }
 }
 
@@ -141,7 +152,8 @@ private fun LookbookLanding(
     onCollection: (LookbookCollection) -> Unit,
     onOutfit: (Outfit) -> Unit,
     onSearch: () -> Unit,
-    onGenerate: () -> Unit
+    onGenerate: () -> Unit,
+    onTryOn: (Outfit) -> Unit
 ) {
     val collections by ClosetRepository.collections.collectAsState()
     var temperatureC by remember { mutableStateOf(24f) }
@@ -237,7 +249,7 @@ private fun LookbookLanding(
                         ClosetRepository.wearOutfitToday(outfit.id)
                         showToast("Logged as today's outfit")
                     },
-                    onTryOn = { showToast("Opening virtual try-on…") },
+                    onTryOn = { onTryOn(outfit) },
                     onSave = { ClosetRepository.toggleOutfitSaved(outfit.id) }
                 )
             }
@@ -289,7 +301,7 @@ private fun LookbookLanding(
         if (recent.isEmpty()) {
             EmptyLookbookRow("No recent outfits yet — wear a look today")
         } else {
-            OutfitRow(recent, temperatureC, onOutfit)
+            OutfitRow(recent, temperatureC, onOutfit, onTryOn)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -301,7 +313,7 @@ private fun LookbookLanding(
         if (favorites.isEmpty()) {
             EmptyLookbookRow("Tap ❤️ on any outfit to save favorites")
         } else {
-            OutfitRow(favorites, temperatureC, onOutfit)
+            OutfitRow(favorites, temperatureC, onOutfit, onTryOn)
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -337,7 +349,8 @@ private fun EmptyLookbookRow(message: String) {
 private fun OutfitRow(
     outfits: List<Outfit>,
     temperatureC: Float,
-    onOutfit: (Outfit) -> Unit
+    onOutfit: (Outfit) -> Unit,
+    onTryOn: (Outfit) -> Unit
 ) {
     LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp),
@@ -351,7 +364,7 @@ private fun OutfitRow(
                 onClick = { onOutfit(outfit) },
                 onFavorite = { ClosetRepository.toggleOutfitFavorite(outfit.id) },
                 onWearToday = { ClosetRepository.wearOutfitToday(outfit.id) },
-                onTryOn = { showToast("Opening virtual try-on…") },
+                onTryOn = { onTryOn(outfit) },
                 onSave = { ClosetRepository.toggleOutfitSaved(outfit.id) }
             )
         }
@@ -363,7 +376,8 @@ private fun LookbookSectionScreen(
     section: LookbookSection,
     title: String,
     onBack: () -> Unit,
-    onOutfit: (Outfit) -> Unit
+    onOutfit: (Outfit) -> Unit,
+    onTryOn: (Outfit) -> Unit
 ) {
   val garments by ClosetRepository.garments.collectAsState()
   val outfits = remember(section, title, garments) {
@@ -400,7 +414,7 @@ private fun LookbookSectionScreen(
                     onClick = { onOutfit(outfit) },
                     onFavorite = { ClosetRepository.toggleOutfitFavorite(outfit.id) },
                     onWearToday = { ClosetRepository.wearOutfitToday(outfit.id) },
-                    onTryOn = { showToast("Opening virtual try-on…") },
+                    onTryOn = { onTryOn(outfit) },
                     onSave = { ClosetRepository.toggleOutfitSaved(outfit.id) },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -413,7 +427,8 @@ private fun LookbookSectionScreen(
 private fun LookbookCollectionScreen(
     collection: LookbookCollection,
     onBack: () -> Unit,
-    onOutfit: (Outfit) -> Unit
+    onOutfit: (Outfit) -> Unit,
+    onTryOn: (Outfit) -> Unit
 ) {
     val garments by ClosetRepository.garments.collectAsState()
     val outfits = remember(collection.id, garments) { ClosetRepository.getOutfitsForCollection(collection.id) }
@@ -441,7 +456,7 @@ private fun LookbookCollectionScreen(
                     onClick = { onOutfit(outfit) },
                     onFavorite = { ClosetRepository.toggleOutfitFavorite(outfit.id) },
                     onWearToday = { ClosetRepository.wearOutfitToday(outfit.id) },
-                    onTryOn = { showToast("Opening virtual try-on…") },
+                    onTryOn = { onTryOn(outfit) },
                     onSave = { ClosetRepository.toggleOutfitSaved(outfit.id) },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -453,7 +468,8 @@ private fun LookbookCollectionScreen(
 @Composable
 private fun LookbookSearchScreen(
     onBack: () -> Unit,
-    onOutfit: (Outfit) -> Unit
+    onOutfit: (Outfit) -> Unit,
+    onTryOn: (Outfit) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
     val garments by ClosetRepository.garments.collectAsState()
@@ -492,7 +508,7 @@ private fun LookbookSearchScreen(
                     onClick = { onOutfit(outfit) },
                     onFavorite = { ClosetRepository.toggleOutfitFavorite(outfit.id) },
                     onWearToday = { ClosetRepository.wearOutfitToday(outfit.id) },
-                    onTryOn = { showToast("Opening virtual try-on…") },
+                    onTryOn = { onTryOn(outfit) },
                     onSave = { ClosetRepository.toggleOutfitSaved(outfit.id) },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -505,7 +521,8 @@ private fun LookbookSearchScreen(
 fun OutfitDetailScreen(
     outfit: Outfit,
     onBack: () -> Unit,
-    onEdit: () -> Unit
+    onEdit: () -> Unit,
+    onTryOn: () -> Unit = {}
 ) {
     val liveOutfit = ClosetRepository.getOutfitById(outfit.id) ?: outfit
     var temperatureC by remember { mutableStateOf(liveOutfit.temperatureC) }
@@ -619,7 +636,7 @@ fun OutfitDetailScreen(
             )
             ElegantButton(
                 text = "Try On",
-                onClick = { showToast("Opening virtual try-on…") },
+                onClick = onTryOn,
                 modifier = Modifier.weight(1f),
                 isSecondary = true,
                 icon = Icons.Default.AutoFixHigh

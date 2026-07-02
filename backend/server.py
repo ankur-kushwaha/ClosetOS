@@ -24,6 +24,7 @@ from pipeline.config import (
     STORAGE_DIR,
     NORMALIZATION_PROVIDER,
     MIN_DETECTION_CONFIDENCE,
+    TRY_ON_MODEL,
 )
 from pipeline.model_loaders import ModelLoaders
 from pipeline.normalization import normalize_garment
@@ -31,6 +32,7 @@ from pipeline.florence_attrs import extract_attributes
 from pipeline.fashion_clip import encode_image
 from pipeline.yolo_world import detect_yolo_world
 from pipeline.travel_capsule import generate_travel_capsule
+from pipeline.try_on import render_try_on, TryOnError
 
 app = FastAPI(title="WardrobeOS Ingestion & Try-On Pipeline Backend")
 
@@ -109,6 +111,7 @@ def read_root():
         "device": device,
         "active_detector": DETECTION_MODEL,
         "normalization_provider": NORMALIZATION_PROVIDER,
+        "try_on_model": TRY_ON_MODEL,
         "database": db_manager.db_type,
         "storage": GARMENTS_DIR
     }
@@ -222,6 +225,20 @@ class TravelCapsuleRequest(BaseModel):
     weather_condition: str
     garments: List[TravelGarmentInput]
     preferred_styles: List[str] = []
+
+
+class TryOnGarmentInput(BaseModel):
+    id: str
+    category: str
+    subcategory: str
+    colorName: str = ""
+    image_base64: str
+
+
+class TryOnRequest(BaseModel):
+    person_image_base64: str
+    garments: List[TryOnGarmentInput]
+    outfit_id: Optional[str] = None
 
 def clean_garment_caption(raw_caption: str) -> str:
     import re
@@ -442,6 +459,105 @@ def yolo_world_finalize(payload: FinalizePayload):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/try-on/check")
+def try_on_check():
+    """Diagnose Gemini billing vs known image-model quota bug."""
+    from pipeline.config import GEMINI_API_KEY, TRY_ON_MODEL
+
+    if not GEMINI_API_KEY:
+        return {
+            "ok": False,
+            "model": TRY_ON_MODEL,
+            "error": "GEMINI_API_KEY is not set in backend/.env",
+        }
+
+    key_hint = f"{GEMINI_API_KEY[:4]}…{GEMINI_API_KEY[-4:]}" if len(GEMINI_API_KEY) > 8 else "(too short)"
+    result = {
+        "ok": False,
+        "model": TRY_ON_MODEL,
+        "key_hint": key_hint,
+        "text_model_ok": False,
+        "image_model_ok": False,
+    }
+
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        client.models.get(model=TRY_ON_MODEL)
+
+        try:
+            client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents="Reply with OK",
+            )
+            result["text_model_ok"] = True
+        except Exception as text_exc:
+            result["text_error"] = str(text_exc)[:300]
+
+        try:
+            client.models.generate_content(
+                model=TRY_ON_MODEL,
+                contents="A red circle on white background",
+                config=types.GenerateContentConfig(response_modalities=["IMAGE"]),
+            )
+            result["image_model_ok"] = True
+            result["ok"] = True
+            result["message"] = "Image generation is working."
+            return result
+        except Exception as image_exc:
+            err = str(image_exc)
+            result["image_error"] = err[:500]
+            if "free_tier" in err and result["text_model_ok"]:
+                result["diagnosis"] = "known_platform_bug"
+                result["message"] = (
+                    "Billing is active (text models work) but image models are still "
+                    "routed to free_tier with limit 0. This is a known Google bug "
+                    "affecting Paid Tier 1 image generation since Feb 2026."
+                )
+                result["actions"] = [
+                    "Wait 30–60 min after enabling billing (you paid today) and retry.",
+                    "Delete and recreate the ClosetOS API key in AI Studio.",
+                    "In GCP Console (project adboard-booking): APIs & Services → enable 'Generative Language API'.",
+                    "Report at https://discuss.ai.google.dev/t/bug-paid-tier-1-account-getting-free-tier-requests-limit-0-on-image-generation-models-gemini-2-5-flash-image-gemini-3-pro-image-preview/123906",
+                    "Or use Vertex AI with a service account (bypasses this AI Studio bug).",
+                ]
+            elif "free_tier" in err:
+                result["diagnosis"] = "billing_not_linked"
+                result["message"] = "API key project has no paid image quota. Link billing in AI Studio."
+            else:
+                result["diagnosis"] = "other_error"
+                result["message"] = "Image generation failed for another reason."
+            return result
+    except Exception as e:
+        result["error"] = str(e)
+        return result
+
+
+@app.post("/try-on/render")
+def try_on_render(payload: TryOnRequest):
+    try:
+        if not payload.person_image_base64:
+            raise HTTPException(status_code=400, detail="person_image_base64 is required")
+        if not payload.garments:
+            raise HTTPException(status_code=400, detail="At least one garment is required")
+
+        garment_dicts = [g.model_dump() for g in payload.garments]
+        result = render_try_on(payload.person_image_base64, garment_dicts)
+        result["outfit_id"] = payload.outfit_id
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except TryOnError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # Travel capsule planner (GPT + rule-based fallback)
 @app.post("/travel/capsule")
