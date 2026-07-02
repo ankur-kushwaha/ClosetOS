@@ -1,0 +1,28 @@
+# Virtual environments and local secrets
+venv/
+.venv/
+env/
+.env
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+
+# Runtime data and downloaded weights (baked in at build via download_models.py)
+storage/
+.models/
+weights/
+*.pt
+*.pth
+*.onnx
+*.safetensors
+
+# Local databases and logs
+closet_metadata.db
+*.log
+
+# Git
+.git/
+.gitignore
