@@ -682,7 +682,7 @@ actual suspend fun runGarmentDetection(path: String): List<com.closetos.app.data
             val file = File(path)
             if (!file.exists()) return@withContext null
 
-            val savedIp = PlatformStorage.loadString("backend_ip")?.trim() ?: "http://10.0.2.2:8000"
+            val savedIp = PlatformStorage.loadString("backend_ip")?.trim() ?: "https://closetos.adboardtools.com"
             val baseUrl = if (savedIp.startsWith("http://") || savedIp.startsWith("https://")) {
                 savedIp
             } else {
