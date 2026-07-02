@@ -84,11 +84,13 @@ pip install -r requirements.txt
 
 ### 3. Pre-download Model Weights
 
-To ensure the machine learning models (SAM, Florence-2, FashionCLIP, YOLO-World) are pre-loaded and cached offline, run the caching script:
+Model weight files are **not stored in git**. They are downloaded on first use or pre-cached with:
 
 ```bash
 python download_models.py
 ```
+
+This caches SAM, Florence-2, FashionCLIP, YOLO-World, rembg, and RealESRGAN weights under the Hugging Face cache, Ultralytics cache, and `backend/.models/` (configurable via `MODELS_DIR`).
 
 ### 4. Run the Server
 

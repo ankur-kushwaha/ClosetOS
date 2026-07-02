@@ -55,3 +55,12 @@ MIN_IMAGE_DIMENSION = 256
 
 STORAGE_DIR = "storage"
 GARMENTS_DIR = os.path.join(STORAGE_DIR, "garments")
+
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent
+MODELS_DIR = _env("MODELS_DIR", str(_BACKEND_ROOT / ".models"))
+YOLO_MODEL = _env("YOLO_MODEL", "yolov8s-worldv2.pt")
+REALESRGAN_MODEL = _env("REALESRGAN_MODEL", "RealESRGAN_x4plus.pth")
+REALESRGAN_URL = _env(
+    "REALESRGAN_URL",
+    "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
+)

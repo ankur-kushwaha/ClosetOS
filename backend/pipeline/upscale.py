@@ -7,8 +7,12 @@ def run_upscale_async(input_path: str, output_path: str):
     try:
         import cv2
         from realesrgan import RealESRGANer
+
+        from .model_assets import ensure_realesrgan_weights
+
         print("Upscaling image with RealESRGAN...")
-        model = RealESRGANer(scale=4, model_path="RealESRGAN_x4plus.pth", gpu_id=None)
+        model_path = str(ensure_realesrgan_weights())
+        model = RealESRGANer(scale=4, model_path=model_path, gpu_id=None)
         img = cv2.imread(input_path, cv2.IMREAD_UNCHANGED)
         output, _ = model.enhance(img, outscale=4)
         cv2.imwrite(output_path, output)

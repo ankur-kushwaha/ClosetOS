@@ -4,8 +4,9 @@ import sys
 # Add current directory to path so pipeline imports work
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from pipeline.model_loaders import ModelLoaders
 from pipeline.fashion_clip import get_fashion_clip_model
+from pipeline.model_assets import ensure_realesrgan_weights
+from pipeline.model_loaders import ModelLoaders
 
 def main():
     print("Pre-downloading machine learning models for offline/container deployment...")
@@ -32,10 +33,21 @@ def main():
         
     print("\n4. Loading YOLO-World...")
     try:
-        # Load YOLO-World model locally to verify and register
         loaders.get_yolo_world_model()
     except Exception as e:
         print(f"Error checking YOLO-World: {e}")
+
+    print("\n5. Initializing rembg cloth session...")
+    try:
+        loaders.get_rembg_session()
+    except Exception as e:
+        print(f"Error caching rembg session: {e}")
+
+    print("\n6. Downloading RealESRGAN weights...")
+    try:
+        ensure_realesrgan_weights()
+    except Exception as e:
+        print(f"Error caching RealESRGAN weights: {e}")
 
     print("\nModel caching complete! All models are verified and cached.")
 

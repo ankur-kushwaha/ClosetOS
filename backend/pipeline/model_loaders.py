@@ -9,6 +9,9 @@ from transformers import (
 )
 
 
+from .config import YOLO_MODEL
+
+
 class ModelLoaders:
     def __init__(self, device: str):
         self.device = device
@@ -63,7 +66,7 @@ class ModelLoaders:
 
     def get_yolo_world_model(self):
         if self._yolo_world_model is None:
-            print("Loading YOLO-World (yolov8s-worldv2.pt)...")
+            print(f"Loading YOLO-World ({YOLO_MODEL})...")
             from ultralytics import YOLOWorld
-            self._yolo_world_model = YOLOWorld("yolov8s-worldv2.pt")
+            self._yolo_world_model = YOLOWorld(YOLO_MODEL)
         return self._yolo_world_model

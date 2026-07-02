@@ -51,3 +51,11 @@ env/
 .env
 .ipynb_checkpoints/
 
+# ML model weights (downloaded at runtime or Docker build — not stored in git)
+*.pt
+*.pth
+*.onnx
+*.safetensors
+backend/weights/
+backend/.models/
+
