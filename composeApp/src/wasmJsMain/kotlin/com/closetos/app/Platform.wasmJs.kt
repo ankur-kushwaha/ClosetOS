@@ -302,15 +302,14 @@ actual suspend fun normalizeGarmentCrop(
     return com.closetos.app.data.model.NormalizationResult(imageBase64 = cropBase64, provider = "mock")
 }
 
-actual suspend fun finalizeGarment(
-    imageBase64: String,
+actual suspend fun extractGarmentMetadata(
     cropBase64: String,
-    label: String,
-    sourceImageId: String?
-): Garment? {
+    label: String
+): com.closetos.app.data.model.ExtractedGarmentAttributes? {
+    kotlinx.coroutines.delay(600)
     val template = garmentTemplates.firstOrNull { label.contains(it.category, ignoreCase = true) }
         ?: garmentTemplates[0]
-    return Garment(
+    return com.closetos.app.data.model.ExtractedGarmentAttributes(
         category = template.category,
         subcategory = template.subcategory,
         colorName = "Sky Blue",
@@ -321,11 +320,36 @@ actual suspend fun finalizeGarment(
         seasons = template.seasons,
         formalityScore = template.formalityScore,
         silhouette = template.silhouette,
+        embedding = FloatArray(512)
+    )
+}
+
+actual suspend fun finalizeGarment(
+    imageBase64: String,
+    cropBase64: String,
+    label: String,
+    sourceImageId: String?,
+    precomputedAttributes: com.closetos.app.data.model.ExtractedGarmentAttributes?
+): Garment? {
+    val attrs = precomputedAttributes
+    val template = garmentTemplates.firstOrNull { label.contains(it.category, ignoreCase = true) }
+        ?: garmentTemplates[0]
+    return Garment(
+        category = attrs?.category ?: template.category,
+        subcategory = attrs?.subcategory ?: template.subcategory,
+        colorName = attrs?.colorName ?: "Sky Blue",
+        labColor = attrs?.labColor ?: floatArrayOf(80f, -10f, -20f),
+        material = attrs?.material ?: template.material,
+        pattern = attrs?.pattern ?: template.pattern,
+        fit = attrs?.fit ?: template.fit,
+        seasons = attrs?.seasons ?: template.seasons,
+        formalityScore = attrs?.formalityScore ?: template.formalityScore,
+        silhouette = attrs?.silhouette ?: template.silhouette,
         price = template.price,
         brand = template.brand + " (Web Mock)",
         imageUrl = "",
         straightenedImageUrl = "",
-        embedding = FloatArray(512)
+        embedding = attrs?.embedding ?: FloatArray(512)
     )
 }
 

@@ -135,6 +135,21 @@ data class NormalizationResult(
     val provider: String = "unknown"
 )
 
+data class ExtractedGarmentAttributes(
+    val category: String,
+    val subcategory: String,
+    val colorName: String,
+    val labColor: FloatArray,
+    val material: String,
+    val pattern: String,
+    val fit: String,
+    val seasons: List<String>,
+    val formalityScore: Float,
+    val silhouette: String,
+    val embedding: FloatArray,
+    val florenceCaption: String = ""
+)
+
 data class TryOnResult(
     val imageBase64: String,
     val provider: String = "gemini-3.1-flash-lite-image",
@@ -152,6 +167,7 @@ data class IngestionItem(
     val label: String? = null,
     val cropBase64: String? = null,
     val normalizedBase64: String? = null,
+    val extractedAttributes: ExtractedGarmentAttributes? = null,
     val sourceImageId: String? = null,
     val isManualUpload: Boolean = false
 )

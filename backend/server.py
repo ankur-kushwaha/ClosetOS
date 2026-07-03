@@ -189,6 +189,21 @@ class CropPayload(BaseModel):
     label: str
     caption: Optional[str] = None
 
+class PrecomputedAttributes(BaseModel):
+    category: str
+    subcategory: str
+    colorName: str
+    labColor: List[float]
+    material: str
+    pattern: str
+    fit: str
+    seasons: List[str]
+    formalityScore: float
+    silhouette: str
+    embedding: List[float]
+    florenceCaption: str = ""
+
+
 class FinalizePayload(BaseModel):
     image_base64: str
     crop_base64: Optional[str] = None
@@ -196,6 +211,12 @@ class FinalizePayload(BaseModel):
     source_image_id: Optional[str] = None
     brand: Optional[str] = "Inferred"
     price: Optional[float] = 150.0
+    precomputed_attributes: Optional[PrecomputedAttributes] = None
+
+
+class ExtractMetadataPayload(BaseModel):
+    crop_base64: str
+    label: str
 
 class FlorencePayload(BaseModel):
     image_base64: str
@@ -282,6 +303,84 @@ def run_florence(payload: FlorencePayload):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+def _build_garment_attributes(
+    attrs: Dict[str, Any],
+    embedding,
+    image: Image.Image,
+    label: str,
+    brand: str = "Inferred",
+    price: float = 150.0,
+    normalization_provider: str = "gpt-image",
+) -> Dict[str, Any]:
+    """Shared attribute response used by extract-metadata and finalize."""
+    from pipeline.orchestrator import rgb_to_lab
+
+    img_np = np.array(image)
+    avg_rgb = [128, 128, 128]
+    if img_np.size > 0:
+        mask = img_np[:, :, 3] > 10 if img_np.shape[2] == 4 else np.ones(img_np.shape[:2], dtype=bool)
+        if mask.any():
+            avg_rgb = [int(c) for c in img_np[mask].mean(axis=0)[:3]]
+    lab_color = rgb_to_lab(avg_rgb)
+
+    category = attrs["category"]
+    subcategory = attrs["subcategory"]
+    seasons = (
+        ["Spring", "Summer", "Autumn"]
+        if category != "Outerwear"
+        else ["Autumn", "Winter", "Spring"]
+    )
+    formality_map = {
+        "T-Shirt": 0.1, "Canvas Sneakers": 0.1, "Selvedge Jeans": 0.25,
+        "Oxford Shirt": 0.6, "Pleated Trousers": 0.7, "Leather Loafers": 0.75,
+        "Linen Blazer": 0.75, "Silk Blouse": 0.8, "Trench Coat": 0.85,
+    }
+    formality_score = formality_map.get(subcategory, 0.5)
+
+    return {
+        "category": category,
+        "subcategory": subcategory,
+        "colorName": attrs["colorName"],
+        "labColor": lab_color,
+        "material": attrs["material"],
+        "pattern": attrs["pattern"],
+        "fit": attrs["fit"],
+        "seasons": seasons,
+        "formalityScore": formality_score,
+        "silhouette": subcategory.split()[-1] if subcategory else "clothing",
+        "brand": brand,
+        "price": price,
+        "embedding": embedding.tolist() if hasattr(embedding, "tolist") else list(embedding),
+        "florenceCaption": attrs.get("florence_caption", ""),
+        "normalizationProvider": normalization_provider,
+    }
+
+
+@app.post("/yolo-world/extract-metadata")
+def extract_garment_metadata(payload: ExtractMetadataPayload):
+    """Florence-2 + FashionCLIP on the raw crop (runs in parallel with normalization)."""
+    try:
+        from pipeline.florence_attrs import extract_attributes
+        from pipeline.fashion_clip import encode_image
+
+        crop_bytes = base64.b64decode(payload.crop_base64)
+        image = Image.open(io.BytesIO(crop_bytes)).convert("RGBA")
+        device = loaders.device
+
+        attrs = extract_attributes(image.convert("RGB"), payload.label, device, loaders)
+        embedding = encode_image(image, device)
+
+        return {
+            "attributes": _build_garment_attributes(
+                attrs, embedding, image, payload.label
+            )
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/yolo-world/gpt-normalize")
 def gpt_normalize_crop(payload: CropPayload):
     try:
@@ -320,28 +419,42 @@ def gpt_normalize_crop(payload: CropPayload):
 @app.post("/yolo-world/finalize")
 def yolo_world_finalize(payload: FinalizePayload):
     try:
-        import base64
-        import io
-        from PIL import Image
-        import numpy as np
-        
         from pipeline.florence_attrs import extract_attributes
         from pipeline.fashion_clip import encode_image
-        from pipeline.orchestrator import map_to_try_on_category, map_to_try_on_subcategory, rgb_to_lab
-        from pipeline.config import GARMENTS_DIR
+        from pipeline.orchestrator import map_to_try_on_category, map_to_try_on_subcategory
         
         # Decode base64 image
         img_bytes = base64.b64decode(payload.image_base64)
         image = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
         
-        # 1. Run Florence-2 attribute extraction
-        device = loaders.device
-        attrs = extract_attributes(image.convert("RGB"), payload.label, device, loaders)
+        if payload.precomputed_attributes:
+            pre = payload.precomputed_attributes
+            attrs = {
+                "category": pre.category,
+                "subcategory": pre.subcategory,
+                "colorName": pre.colorName,
+                "colors": [pre.colorName.lower()],
+                "material": pre.material,
+                "pattern": pre.pattern,
+                "fit": pre.fit,
+                "florence_caption": pre.florenceCaption,
+            }
+            embedding = np.array(pre.embedding)
+            response_attrs = pre.model_dump()
+        else:
+            device = loaders.device
+            attrs = extract_attributes(image.convert("RGB"), payload.label, device, loaders)
+            embedding = encode_image(image, device)
+            response_attrs = _build_garment_attributes(
+                attrs,
+                embedding,
+                image,
+                payload.label,
+                brand=payload.brand or "Inferred",
+                price=payload.price or 150.0,
+            )
         
-        # 2. Run FashionCLIP embedding
-        embedding = encode_image(image, device)
-        
-        # 3. Create file assets on disk
+        # Create file assets on disk
         g_id = str(uuid.uuid4())
         g_dir = os.path.join(GARMENTS_DIR, g_id)
         os.makedirs(g_dir, exist_ok=True)
@@ -372,7 +485,6 @@ def yolo_world_finalize(payload: FinalizePayload):
         # Copy original source image if available in temp storage
         if payload.source_image_id:
             try:
-                from pipeline.config import STORAGE_DIR
                 temp_path = os.path.join(STORAGE_DIR, "temp_sources", f"{payload.source_image_id}.jpg")
                 if os.path.exists(temp_path):
                     import shutil
@@ -380,21 +492,10 @@ def yolo_world_finalize(payload: FinalizePayload):
             except Exception as e:
                 print(f"Error copying source_image.jpg: {str(e)}")
         
-        # Average color extraction
-        avg_rgb = [128, 128, 128]
-        img_np = np.array(image)
-        if img_np.size > 0:
-            mask = img_np[:, :, 3] > 10 if img_np.shape[2] == 4 else np.ones(img_np.shape[:2], dtype=bool)
-            if mask.any():
-                avg_rgb = [int(c) for c in img_np[mask].mean(axis=0)[:3]]
-        lab_color = rgb_to_lab(avg_rgb)
-        
         category = attrs["category"]
         subcategory = attrs["subcategory"]
         detected_colors = attrs.get("colors", ["gray"])
         pattern = attrs["pattern"]
-        material = attrs["material"]
-        fit = attrs["fit"]
         
         # Map try_on categories/subcategories
         try_on_cat = map_to_try_on_category(category)
@@ -411,7 +512,7 @@ def yolo_world_finalize(payload: FinalizePayload):
             "bbox": [0, 0, image.width, image.height],
             "source_image_id": payload.source_image_id,
             "extraction_confidence": 1.0,
-            "normalization_provider": "gpt-image",
+            "normalization_provider": response_attrs.get("normalizationProvider", "gpt-image"),
             "florence_caption": attrs.get("florence_caption", ""),
         }
         
@@ -420,40 +521,11 @@ def yolo_world_finalize(payload: FinalizePayload):
         with open(os.path.join(g_dir, "metadata.json"), "w") as f:
             json.dump(metadata_dict, f, indent=2)
             
-        # Compile response
-        seasons = (
-            ["Spring", "Summer", "Autumn"]
-            if category != "Outerwear"
-            else ["Autumn", "Winter", "Spring"]
-        )
-        formality_map = {
-            "T-Shirt": 0.1, "Canvas Sneakers": 0.1, "Selvedge Jeans": 0.25,
-            "Oxford Shirt": 0.6, "Pleated Trousers": 0.7, "Leather Loafers": 0.75,
-            "Linen Blazer": 0.75, "Silk Blouse": 0.8, "Trench Coat": 0.85,
-        }
-        formality_score = formality_map.get(subcategory, 0.5)
-        
         return {
             "garment_id": g_id,
             "image_base64": payload.image_base64,
             "straightened_image_base64": payload.image_base64,
-            "attributes": {
-                "category": category,
-                "subcategory": subcategory,
-                "colorName": attrs["colorName"],
-                "labColor": lab_color,
-                "material": material,
-                "pattern": pattern,
-                "fit": fit,
-                "seasons": seasons,
-                "formalityScore": formality_score,
-                "silhouette": subcategory.split()[-1] if subcategory else "clothing",
-                "brand": payload.brand,
-                "price": payload.price,
-                "embedding": embedding.tolist() if hasattr(embedding, "tolist") else list(embedding),
-                "florenceCaption": attrs.get("florence_caption", ""),
-                "normalizationProvider": "gpt-image",
-            }
+            "attributes": response_attrs,
         }
     except Exception as e:
         import traceback

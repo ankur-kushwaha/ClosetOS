@@ -665,6 +665,19 @@ object ClosetRepository {
         }
     }
 
+    fun updateIngestionItemExtractedAttributes(
+        itemId: String,
+        attributes: com.closetos.app.data.model.ExtractedGarmentAttributes
+    ) {
+        _ingestionQueue.value = _ingestionQueue.value.map { item ->
+            if (item.id == itemId) {
+                item.copy(extractedAttributes = attributes)
+            } else {
+                item
+            }
+        }
+    }
+
     fun approveIngestionItem(itemId: String) {
         val item = _ingestionQueue.value.find { it.id == itemId } ?: return
         val garment = item.detectedGarment ?: return

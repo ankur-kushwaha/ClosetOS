@@ -37,6 +37,8 @@ import com.closetos.app.ui.components.SectionHeader
 import com.closetos.app.ui.theme.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -349,7 +351,7 @@ fun IngestionScreen() {
                                                 }
 
                                                 startPipeline(id) {
-                                                    runNormalizePipeline(id, box.cropBase64, box.label)
+                                                    runDigitizePipeline(id, box.cropBase64, box.label)
                                                 }
                                             }
                                         }
@@ -396,30 +398,46 @@ private suspend fun checkPipelineActive() {
     if (!currentCoroutineContext().isActive) throw CancellationException()
 }
 
-private suspend fun runNormalizePipeline(
+private suspend fun runDigitizePipeline(
     itemId: String,
     cropBase64: String,
     label: String
 ) {
     checkPipelineActive()
-    ClosetRepository.updateIngestionItemProgress(itemId, IngestionStatus.NORMALIZATION, 0.5f, "Normalizing with AI...")
-    val result = normalizeGarmentCrop(cropBase64, label)
-    checkPipelineActive()
-    if (result != null) {
-        ClosetRepository.updateIngestionItemNormalized(itemId, result.imageBase64)
+    ClosetRepository.updateIngestionItemProgress(
+        itemId,
+        IngestionStatus.NORMALIZATION,
+        0.4f,
+        "Normalizing & analyzing garment..."
+    )
+
+    coroutineScope {
+        val normalizeDeferred = async { normalizeGarmentCrop(cropBase64, label) }
+        val metadataDeferred = async { extractGarmentMetadata(cropBase64, label) }
+
+        val result = normalizeDeferred.await()
+        checkPipelineActive()
+        if (result != null) {
+            ClosetRepository.updateIngestionItemNormalized(itemId, result.imageBase64)
+        } else {
+            ClosetRepository.updateIngestionItemNormalized(itemId, cropBase64)
+        }
+
+        val metadata = metadataDeferred.await()
+        checkPipelineActive()
+        if (metadata != null) {
+            ClosetRepository.updateIngestionItemExtractedAttributes(itemId, metadata)
+        }
+
         ClosetRepository.updateIngestionItemProgress(
             itemId,
             IngestionStatus.NORMALIZATION_REVIEW,
             0.85f,
-            "Tap to review normalization"
-        )
-    } else {
-        ClosetRepository.updateIngestionItemNormalized(itemId, cropBase64)
-        ClosetRepository.updateIngestionItemProgress(
-            itemId,
-            IngestionStatus.NORMALIZATION_REVIEW,
-            0.85f,
-            "Tap to review normalization (AI unavailable)"
+            if (metadata != null) {
+                "Tap to review normalization"
+            } else {
+                "Tap to review normalization (metadata will retry on accept)"
+            }
         )
     }
 }
@@ -438,9 +456,21 @@ private suspend fun runFinalizePipeline(item: IngestionItem, useNormalized: Bool
         item.id,
         IngestionStatus.FLORENCE_2,
         0.92f,
-        if (useNormalized) "Extracting metadata from normalized image..." else "Extracting metadata from original crop..."
+        if (item.extractedAttributes != null) {
+            "Saving garment..."
+        } else if (useNormalized) {
+            "Extracting metadata from normalized image..."
+        } else {
+            "Extracting metadata from original crop..."
+        }
     )
-    val garment = finalizeGarment(imageBase64, cropBase64, label, item.sourceImageId)
+    val garment = finalizeGarment(
+        imageBase64,
+        cropBase64,
+        label,
+        item.sourceImageId,
+        item.extractedAttributes
+    )
     checkPipelineActive()
     if (garment != null) {
         ClosetRepository.updateIngestionItemProgress(item.id, IngestionStatus.READY, 1.0f, "Tap to confirm metadata", garment)
@@ -465,14 +495,14 @@ private suspend fun retryIngestionItem(item: IngestionItem) {
         }
         IngestionStatus.FAILED -> {
             if (!cropBase64.isNullOrEmpty() && !label.isNullOrEmpty()) {
-                runNormalizePipeline(item.id, cropBase64, label)
+                runDigitizePipeline(item.id, cropBase64, label)
             } else {
                 simulateGarmentPipeline(item)
             }
         }
         else -> {
             if (!cropBase64.isNullOrEmpty() && !label.isNullOrEmpty()) {
-                runNormalizePipeline(item.id, cropBase64, label)
+                runDigitizePipeline(item.id, cropBase64, label)
             } else {
                 simulateGarmentPipeline(item)
             }

@@ -2,6 +2,7 @@ package com.closetos.app
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.ImageBitmap
+import com.closetos.app.data.model.ExtractedGarmentAttributes
 import com.closetos.app.data.model.Garment
 import com.closetos.app.data.model.NormalizationResult
 import com.closetos.app.data.model.TravelCapsulePlan
@@ -68,11 +69,17 @@ expect suspend fun normalizeGarmentCrop(
     label: String
 ): NormalizationResult?
 
+expect suspend fun extractGarmentMetadata(
+    cropBase64: String,
+    label: String
+): ExtractedGarmentAttributes?
+
 expect suspend fun finalizeGarment(
     imageBase64: String,
     cropBase64: String,
     label: String,
-    sourceImageId: String? = null
+    sourceImageId: String? = null,
+    precomputedAttributes: ExtractedGarmentAttributes? = null
 ): Garment?
 
 expect suspend fun cropImageToBase64(

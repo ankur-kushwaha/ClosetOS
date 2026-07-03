@@ -814,11 +814,96 @@ actual suspend fun normalizeGarmentCrop(
     }
 }
 
+private fun parseExtractedAttributes(attr: org.json.JSONObject): com.closetos.app.data.model.ExtractedGarmentAttributes {
+    val embedArray = attr.getJSONArray("embedding")
+    val embedding = FloatArray(512) { embedArray.getDouble(it).toFloat() }
+    val labArray = attr.getJSONArray("labColor")
+    val labColor = FloatArray(3) { labArray.getDouble(it).toFloat() }
+    val seasonsArray = attr.getJSONArray("seasons")
+    val seasons = List(seasonsArray.length()) { seasonsArray.getString(it) }
+    return com.closetos.app.data.model.ExtractedGarmentAttributes(
+        category = attr.getString("category"),
+        subcategory = attr.getString("subcategory"),
+        colorName = attr.getString("colorName"),
+        labColor = labColor,
+        material = attr.getString("material"),
+        pattern = attr.getString("pattern"),
+        fit = attr.getString("fit"),
+        seasons = seasons,
+        formalityScore = attr.getDouble("formalityScore").toFloat(),
+        silhouette = attr.getString("silhouette"),
+        embedding = embedding,
+        florenceCaption = attr.optString("florenceCaption", "")
+    )
+}
+
+private fun org.json.JSONObject.putExtractedAttributes(
+    attrs: com.closetos.app.data.model.ExtractedGarmentAttributes
+) {
+    val precomputed = org.json.JSONObject()
+    precomputed.put("category", attrs.category)
+    precomputed.put("subcategory", attrs.subcategory)
+    precomputed.put("colorName", attrs.colorName)
+    precomputed.put("labColor", org.json.JSONArray(attrs.labColor.map { it.toDouble() }))
+    precomputed.put("material", attrs.material)
+    precomputed.put("pattern", attrs.pattern)
+    precomputed.put("fit", attrs.fit)
+    precomputed.put("seasons", org.json.JSONArray(attrs.seasons))
+    precomputed.put("formalityScore", attrs.formalityScore.toDouble())
+    precomputed.put("silhouette", attrs.silhouette)
+    precomputed.put("embedding", org.json.JSONArray(attrs.embedding.map { it.toDouble() }))
+    precomputed.put("florenceCaption", attrs.florenceCaption)
+    put("precomputed_attributes", precomputed)
+}
+
+actual suspend fun extractGarmentMetadata(
+    cropBase64: String,
+    label: String
+): com.closetos.app.data.model.ExtractedGarmentAttributes? {
+    return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        var conn: java.net.HttpURLConnection? = null
+        try {
+            val url = java.net.URL("${resolveBackendBaseUrl()}/yolo-world/extract-metadata")
+            conn = url.openConnection() as java.net.HttpURLConnection
+            conn.doOutput = true
+            conn.doInput = true
+            conn.useCaches = false
+            conn.requestMethod = "POST"
+            conn.connectTimeout = 90_000
+            conn.readTimeout = 90_000
+            conn.setRequestProperty("Content-Type", "application/json")
+
+            val payload = org.json.JSONObject()
+            payload.put("crop_base64", cropBase64)
+            payload.put("label", label)
+
+            conn.outputStream.use { out ->
+                out.write(payload.toString().toByteArray(charset("UTF-8")))
+                out.flush()
+            }
+
+            if (conn.responseCode != java.net.HttpURLConnection.HTTP_OK) {
+                return@withContext null
+            }
+
+            val res = conn.inputStream.bufferedReader().use { it.readText() }
+            val root = org.json.JSONObject(res)
+            parseExtractedAttributes(root.getJSONObject("attributes"))
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        } finally {
+            conn?.disconnect()
+        }
+    }
+}
+
 actual suspend fun finalizeGarment(
     imageBase64: String,
     cropBase64: String,
     label: String,
-    sourceImageId: String?
+    sourceImageId: String?,
+    precomputedAttributes: com.closetos.app.data.model.ExtractedGarmentAttributes?
 ): Garment? {
     val context = PlatformStorage.applicationContext ?: return null
     return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -842,6 +927,9 @@ actual suspend fun finalizeGarment(
             if (sourceImageId != null) {
                 finalPayload.put("source_image_id", sourceImageId)
             }
+            if (precomputedAttributes != null) {
+                finalPayload.putExtractedAttributes(precomputedAttributes)
+            }
 
             finalizeConn.outputStream.use { out ->
                 out.write(finalPayload.toString().toByteArray(charset("UTF-8")))
@@ -859,6 +947,7 @@ actual suspend fun finalizeGarment(
             val base64Img = root2.getString("image_base64")
             val straightenedBase64Img = root2.optString("straightened_image_base64", base64Img)
             val attr = root2.getJSONObject("attributes")
+            val parsedAttrs = parseExtractedAttributes(attr)
 
             val pngBytes = android.util.Base64.decode(base64Img, android.util.Base64.DEFAULT)
             val croppedFile = File(context.filesDir, "cropped_server_${System.currentTimeMillis()}.png")
@@ -878,31 +967,22 @@ actual suspend fun finalizeGarment(
                 fos.write(straightenedPngBytes)
             }
 
-            val embedArray = attr.getJSONArray("embedding")
-            val embedding = FloatArray(512) { embedArray.getDouble(it).toFloat() }
-
-            val labArray = attr.getJSONArray("labColor")
-            val labColor = FloatArray(3) { labArray.getDouble(it).toFloat() }
-
-            val seasonsArray = attr.getJSONArray("seasons")
-            val seasons = List(seasonsArray.length()) { seasonsArray.getString(it) }
-
             Garment(
-                category = attr.getString("category"),
-                subcategory = attr.getString("subcategory"),
-                colorName = attr.getString("colorName"),
-                labColor = labColor,
-                material = attr.getString("material"),
-                pattern = attr.getString("pattern"),
-                fit = attr.getString("fit"),
-                seasons = seasons,
-                formalityScore = attr.getDouble("formalityScore").toFloat(),
-                silhouette = attr.getString("silhouette"),
+                category = parsedAttrs.category,
+                subcategory = parsedAttrs.subcategory,
+                colorName = parsedAttrs.colorName,
+                labColor = parsedAttrs.labColor,
+                material = parsedAttrs.material,
+                pattern = parsedAttrs.pattern,
+                fit = parsedAttrs.fit,
+                seasons = parsedAttrs.seasons,
+                formalityScore = parsedAttrs.formalityScore,
+                silhouette = parsedAttrs.silhouette,
                 brand = attr.optString("brand", "Inferred"),
                 price = attr.optDouble("price", 0.0),
                 imageUrl = rawCropFile.absolutePath,
                 straightenedImageUrl = straightenedFile.absolutePath,
-                embedding = embedding
+                embedding = parsedAttrs.embedding
             )
         } catch (e: Exception) {
             e.printStackTrace()
