@@ -835,9 +835,11 @@ actual suspend fun runGarmentDetection(path: String): List<com.closetos.app.data
                     bboxJson.getInt(2),
                     bboxJson.getInt(3)
                 )
-                val label = labelsArray.getString(i)
-                val score = scoresArray.getDouble(i).toFloat()
-                val cropBase64 = cropsArray.getString(i)
+                val label = labelsArray.optString(i, "").ifBlank {
+                    "Garment ${i + 1}"
+                }
+                val score = scoresArray.optDouble(i, 0.0).toFloat()
+                val cropBase64 = cropsArray.optString(i, "")
                 
                 list.add(
                     com.closetos.app.data.model.DetectedBox(

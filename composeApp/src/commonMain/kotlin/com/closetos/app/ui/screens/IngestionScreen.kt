@@ -266,7 +266,7 @@ fun IngestionScreen() {
 
                                                 Column(modifier = Modifier.weight(1f)) {
                                                     Text(
-                                                        text = box.label.uppercase(),
+                                                        text = GarmentCategories.detectionTileName(box.label, idx),
                                                         fontFamily = OutfitFont,
                                                         fontWeight = FontWeight.Bold,
                                                         fontSize = 13.sp,
@@ -800,11 +800,7 @@ fun PipelineItemRow(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (!item.label.isNullOrEmpty()) {
-                                item.label.uppercase()
-                            } else {
-                                item.originalImageUrl.substringAfterLast("/").substringAfterLast("\\").replace("gallery_image_", "").replace("retailer_fetched_", "")
-                            },
+                            text = GarmentCategories.ingestionItemDisplayName(item),
                             fontFamily = OutfitFont,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
