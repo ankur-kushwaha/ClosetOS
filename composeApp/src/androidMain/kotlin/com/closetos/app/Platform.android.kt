@@ -99,6 +99,71 @@ actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
     BackHandler(enabled = enabled, onBack = onBack)
 }
 
+private fun isJpeg(bytes: ByteArray): Boolean =
+    bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte()
+
+private fun isPng(bytes: ByteArray): Boolean =
+    bytes.size >= 8 && bytes.copyOfRange(0, 8).contentEquals(
+        byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+    )
+
+private fun looksLikeBase64ImageText(bytes: ByteArray): Boolean {
+    if (bytes.isEmpty()) return false
+    if (bytes[0] != '/'.code.toByte() && bytes[0] != 'i'.code.toByte()) return false
+    val head = try {
+        bytes.decodeToString().take(12)
+    } catch (_: Exception) {
+        return false
+    }
+    return head.startsWith("/9j/") || head.startsWith("iVBORw0KGgo")
+}
+
+/** Decode API/base64 payloads that may be single- or double-encoded. */
+private fun decodeImageBytesFromBase64(base64: String): ByteArray? {
+    if (base64.isBlank()) return null
+    return try {
+        var bytes = Base64.decode(base64, Base64.DEFAULT)
+        if (looksLikeBase64ImageText(bytes)) {
+            bytes = Base64.decode(bytes.decodeToString(), Base64.DEFAULT)
+        }
+        when {
+            isJpeg(bytes) || isPng(bytes) -> bytes
+            else -> null
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
+
+private fun bitmapFromImageBytes(bytes: ByteArray): ImageBitmap? {
+    return try {
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+    } catch (e: Exception) {
+        null
+    }
+}
+
+private fun bitmapFromImageFile(file: File, rewriteIfNeeded: Boolean = false): ImageBitmap? {
+    BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()?.let { return it }
+    val raw = try {
+        file.readBytes()
+    } catch (_: Exception) {
+        return null
+    }
+    if (looksLikeBase64ImageText(raw)) {
+        val decoded = decodeImageBytesFromBase64(raw.decodeToString()) ?: return null
+        if (rewriteIfNeeded) {
+            try {
+                FileOutputStream(file).use { it.write(decoded) }
+            } catch (_: Exception) {
+            }
+        }
+        return bitmapFromImageBytes(decoded)
+    }
+    return bitmapFromImageBytes(raw)
+}
+
 private fun resolveLocalImageFile(path: String): File? {
     if (path.isBlank()) return null
     val context = PlatformStorage.applicationContext
@@ -113,7 +178,22 @@ private fun resolveLocalImageFile(path: String): File? {
 
 actual fun isLocalImageFileValid(path: String): Boolean {
     val file = resolveLocalImageFile(path) ?: return false
-    return file.length() > 100
+    return fileContainsImageBytes(file)
+}
+
+private fun fileContainsImageBytes(file: File): Boolean {
+    if (file.length() <= 100) return false
+    val head = try {
+        file.inputStream().use { input ->
+            val buf = ByteArray(16)
+            val read = input.read(buf)
+            if (read <= 0) return false
+            buf.copyOf(read)
+        }
+    } catch (_: Exception) {
+        return false
+    }
+    return isJpeg(head) || isPng(head) || looksLikeBase64ImageText(head)
 }
 
 @Composable
@@ -121,7 +201,18 @@ actual fun rememberImageBitmap(path: String): ImageBitmap? {
     return remember(path) {
         try {
             val file = resolveLocalImageFile(path) ?: return@remember null
-            BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+            bitmapFromImageFile(file, rewriteIfNeeded = true)
+        } catch (e: Exception) {
+            null
+        }
+    }
+}
+
+actual suspend fun loadImageBitmapFromPath(path: String): ImageBitmap? {
+    return withContext(Dispatchers.IO) {
+        try {
+            val file = resolveLocalImageFile(path) ?: return@withContext null
+            bitmapFromImageFile(file, rewriteIfNeeded = true)
         } catch (e: Exception) {
             null
         }
@@ -1025,11 +1116,10 @@ actual suspend fun saveBase64ImageToFile(base64: String, prefix: String): String
     return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
             if (base64.isBlank()) return@withContext null
-            val pngBytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
-            if (pngBytes.size < 100) return@withContext null
+            val imageBytes = decodeImageBytesFromBase64(base64) ?: return@withContext null
             val file = File(context.filesDir, "${prefix}_${System.currentTimeMillis()}.png")
             FileOutputStream(file).use { fos ->
-                fos.write(pngBytes)
+                fos.write(imageBytes)
             }
             file.absolutePath
         } catch (e: Exception) {
@@ -1141,9 +1231,8 @@ actual suspend fun generateTravelCapsule(
 
 actual fun decodeBase64ToBitmap(base64: String): ImageBitmap? {
     return try {
-        val decodedString = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
-        val decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.size)
-        decodedByte.asImageBitmap()
+        val bytes = decodeImageBytesFromBase64(base64) ?: return null
+        bitmapFromImageBytes(bytes)
     } catch (e: Exception) {
         e.printStackTrace()
         null
@@ -1158,8 +1247,7 @@ actual fun getDigitalTwinSelfiePath(): String? {
 
 private fun fileToBase64(path: String): String? {
     return try {
-        val file = File(path)
-        if (!file.exists()) return null
+        val file = resolveLocalImageFile(path) ?: return null
         Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
     } catch (e: Exception) {
         e.printStackTrace()

@@ -61,6 +61,25 @@ def _build_try_on_prompt(garments: list) -> str:
     )
 
 
+def _normalize_inline_image_base64(data) -> str | None:
+  """Return a single-layer base64 image string from Gemini inline bytes or text."""
+  if isinstance(data, str):
+    return data if len(data) >= 100 else None
+  if not isinstance(data, (bytes, bytearray)):
+    return None
+  if len(data) < 100:
+    return None
+  if data[:2] == b"\xff\xd8" or data[:8] == b"\x89PNG\r\n\x1a\n":
+    return base64.b64encode(data).decode("utf-8")
+  try:
+    text = data.decode("ascii")
+  except UnicodeDecodeError:
+    return base64.b64encode(data).decode("utf-8")
+  if text.startswith("/9j/") or text.startswith("iVBORw0KGgo"):
+    return text
+  return base64.b64encode(data).decode("utf-8")
+
+
 def _extract_image_base64(response) -> str:
     parts = list(response.parts or [])
     if not parts and response.candidates:
@@ -70,15 +89,9 @@ def _extract_image_base64(response) -> str:
 
     for part in parts:
         if part.inline_data and part.inline_data.data:
-            data = part.inline_data.data
-            if isinstance(data, str):
-                if len(data) < 100:
-                    continue
-                return data
-            encoded = base64.b64encode(data).decode("utf-8")
-            if len(encoded) < 100:
-                continue
-            return encoded
+            encoded = _normalize_inline_image_base64(part.inline_data.data)
+            if encoded:
+                return encoded
         try:
             image = part.as_image()
         except Exception:

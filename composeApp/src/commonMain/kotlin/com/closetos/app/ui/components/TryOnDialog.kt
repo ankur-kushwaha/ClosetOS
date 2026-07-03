@@ -119,22 +119,22 @@ fun TryOnDialog(
                         }
                         tryOnResult != null -> {
                             val bitmap = rememberTryOnBitmap(tryOnResult)
-                            if (bitmap != null) {
-                                Image(
-                                    bitmap = bitmap,
-                                    contentDescription = "Try-on render",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
-                                Text(
-                                    text = "Try-on image could not be loaded. Tap Re-render to try again.",
-                                    fontFamily = OutfitFont,
-                                    fontSize = 13.sp,
-                                    color = TextMuted,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.padding(24.dp)
-                                )
+                            when {
+                                bitmap != null -> {
+                                    Image(
+                                        bitmap = bitmap,
+                                        contentDescription = "Try-on render",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                                else -> {
+                                    CircularProgressIndicator(
+                                        color = AccentGold,
+                                        strokeWidth = 3.dp,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                }
                             }
                         }
                         else -> {

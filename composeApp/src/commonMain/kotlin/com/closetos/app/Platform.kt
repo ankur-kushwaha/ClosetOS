@@ -22,6 +22,8 @@ expect fun PlatformBackHandler(enabled: Boolean = true, onBack: () -> Unit)
 @Composable
 expect fun rememberImageBitmap(path: String): ImageBitmap?
 
+expect suspend fun loadImageBitmapFromPath(path: String): ImageBitmap?
+
 @Composable
 expect fun rememberCameraLauncher(onResult: (String?) -> Unit): () -> Unit
 

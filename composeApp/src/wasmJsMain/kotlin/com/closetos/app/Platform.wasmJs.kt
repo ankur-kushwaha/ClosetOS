@@ -43,6 +43,10 @@ actual fun rememberImageBitmap(path: String): ImageBitmap? {
     return null
 }
 
+actual suspend fun loadImageBitmapFromPath(path: String): ImageBitmap? = null
+
+actual fun isLocalImageFileValid(path: String): Boolean = false
+
 @Composable
 actual fun rememberCameraLauncher(onResult: (String?) -> Unit): () -> Unit {
     return {
@@ -382,8 +386,6 @@ actual suspend fun generateTravelCapsule(
     garments: List<Garment>,
     preferredStyles: List<String>
 ): TravelCapsulePlan? = null
-
-actual fun isLocalImageFileValid(path: String): Boolean = false
 
 actual fun decodeBase64ToBitmap(base64: String): ImageBitmap? {
     return null

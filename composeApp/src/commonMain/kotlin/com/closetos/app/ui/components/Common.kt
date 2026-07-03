@@ -14,7 +14,11 @@ import androidx.compose.material.icons.filled.Hiking
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,19 +47,34 @@ import com.closetos.app.data.model.Outfit
 import com.closetos.app.data.model.LookbookCollection
 import com.closetos.app.data.model.TryOnResult
 import com.closetos.app.decodeBase64ToBitmap
+import com.closetos.app.loadImageBitmapFromPath
 import com.closetos.app.rememberImageBitmap
 import com.closetos.app.ui.theme.*
 import kotlin.math.pow
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun rememberTryOnBitmap(result: TryOnResult?): ImageBitmap? {
-    val path = result?.imagePath.orEmpty()
-    val base64 = result?.imageBase64.orEmpty()
-    val pathBitmap = rememberImageBitmap(path)
-    val base64Bitmap = remember(base64) {
-        if (base64.isNotBlank()) decodeBase64ToBitmap(base64) else null
+    var bitmap by remember(result?.imagePath, result?.imageBase64) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(result?.imagePath, result?.imageBase64) {
+        bitmap = withContext(Dispatchers.Default) {
+            val path = result?.imagePath.orEmpty()
+            val base64 = result?.imageBase64.orEmpty()
+            if (path.isNotBlank()) {
+                loadImageBitmapFromPath(path) ?: if (base64.isNotBlank()) {
+                    decodeBase64ToBitmap(base64)
+                } else {
+                    null
+                }
+            } else if (base64.isNotBlank()) {
+                decodeBase64ToBitmap(base64)
+            } else {
+                null
+            }
+        }
     }
-    return pathBitmap ?: base64Bitmap
+    return bitmap
 }
 
 @Composable
