@@ -4,6 +4,7 @@ import sys
 # Add current directory to path so pipeline imports work
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+from pipeline.config import YOLO_WORLD_VOCAB
 from pipeline.fashion_clip import get_fashion_clip_model
 from pipeline.model_assets import ensure_realesrgan_weights
 from pipeline.model_loaders import ModelLoaders
@@ -39,7 +40,14 @@ def main():
             CLIPProcessor.from_pretrained("patrickjohncyh/fashion-clip")
 
     step("3. Loading FashionCLIP", load_fashion_clip)
-    step("4. Loading YOLO-World", loaders.get_yolo_world_model)
+
+    def load_yolo_world():
+        model = loaders.get_yolo_world_model()
+        # Triggers ultralytics' lazy install of git+https://github.com/ultralytics/CLIP.git
+        # if it isn't already present — must happen at build time, not on first request.
+        model.set_classes(YOLO_WORLD_VOCAB)
+
+    step("4. Loading YOLO-World", load_yolo_world)
 
     def load_rembg():
         # get_rembg_session() swallows its own errors and returns None on failure

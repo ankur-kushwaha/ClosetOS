@@ -3,6 +3,8 @@
 from typing import List, Tuple
 from PIL import Image
 
+from .config import YOLO_WORLD_VOCAB
+
 def detect_yolo_world(
     image: Image.Image,
     device: str,
@@ -15,19 +17,11 @@ def detect_yolo_world(
         List of tuples: (bbox, label, score) where bbox is [x1, y1, x2, y2]
     """
     model = model_loaders.get_yolo_world_model()
-    
-    # Define a rich vocabulary that aligns with YOLO-World pretraining
-    vocab = [
-        "top", "shirt", "t-shirt", "jacket", "sweater", "hoodie", "blouse",
-        "pants", "jeans", "trousers", "shorts", "skirt",
-        "dress",
-        "shoes", "sneakers", "boots", "loafers", "sandals", "heels",
-    ]
-    
+
     # Only set classes if not already set (to avoid MPS PyTorch embedding bugs on re-setting)
-    if list(model.names.values()) != vocab:
+    if list(model.names.values()) != YOLO_WORLD_VOCAB:
         print("Initializing YOLO-World classes...")
-        model.set_classes(vocab)
+        model.set_classes(YOLO_WORLD_VOCAB)
     
     # Force CPU for YOLO-World on macOS (MPS) to avoid coordinate corruption bug in PyTorch MPS backend
     run_device = "cpu" if device == "mps" else device

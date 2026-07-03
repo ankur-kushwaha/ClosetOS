@@ -47,6 +47,13 @@ CLOTHING_WORDS = [
     "trousers", "sock", "blazer", "hoodie", "vest", "sneaker", "boot",
 ]
 
+YOLO_WORLD_VOCAB = [
+    "top", "shirt", "t-shirt", "jacket", "sweater", "hoodie", "blouse",
+    "pants", "jeans", "trousers", "shorts", "skirt",
+    "dress",
+    "shoes", "sneakers", "boots", "loafers", "sandals", "heels",
+]
+
 # Quality thresholds
 MIN_DETECTION_CONFIDENCE = 0.10
 MIN_MASK_COVERAGE = 0.25
