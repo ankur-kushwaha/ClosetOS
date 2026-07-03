@@ -46,6 +46,12 @@ object ClosetRepository {
         saveTryOnCache()
     }
 
+    fun invalidateTryOnCache(outfitId: String) {
+        if (!_tryOnCache.value.containsKey(outfitId)) return
+        _tryOnCache.value = _tryOnCache.value - outfitId
+        saveTryOnCache()
+    }
+
     private fun saveTryOnCache() {
         val serialized = _tryOnCache.value.entries.joinToString("\n") { "${it.key}|${it.value}" }
         PlatformStorage.saveString("tryon_cache.txt", serialized)

@@ -62,13 +62,35 @@ def _build_try_on_prompt(garments: list) -> str:
 
 
 def _extract_image_base64(response) -> str:
-    parts = response.parts or []
+    parts = list(response.parts or [])
+    if not parts and response.candidates:
+        content = response.candidates[0].content
+        if content and content.parts:
+            parts = list(content.parts)
+
     for part in parts:
         if part.inline_data and part.inline_data.data:
             data = part.inline_data.data
             if isinstance(data, str):
+                if len(data) < 100:
+                    continue
                 return data
-            return base64.b64encode(data).decode("utf-8")
+            encoded = base64.b64encode(data).decode("utf-8")
+            if len(encoded) < 100:
+                continue
+            return encoded
+        try:
+            image = part.as_image()
+        except Exception:
+            image = None
+        if image is not None:
+            import io
+
+            buf = io.BytesIO()
+            image.save(buf, format="PNG")
+            encoded = base64.b64encode(buf.getvalue()).decode("utf-8")
+            if len(encoded) >= 100:
+                return encoded
     raise RuntimeError("Gemini try-on returned no image")
 
 

@@ -108,3 +108,6 @@ expect suspend fun generateTravelCapsule(
 
 expect fun decodeBase64ToBitmap(base64: String): ImageBitmap?
 
+/** True when a local image file exists and is large enough to decode. */
+expect fun isLocalImageFileValid(path: String): Boolean
+

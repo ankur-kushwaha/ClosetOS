@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -40,9 +41,22 @@ import androidx.compose.ui.unit.sp
 import com.closetos.app.data.model.Garment
 import com.closetos.app.data.model.Outfit
 import com.closetos.app.data.model.LookbookCollection
+import com.closetos.app.data.model.TryOnResult
+import com.closetos.app.decodeBase64ToBitmap
 import com.closetos.app.rememberImageBitmap
 import com.closetos.app.ui.theme.*
 import kotlin.math.pow
+
+@Composable
+fun rememberTryOnBitmap(result: TryOnResult?): ImageBitmap? {
+    val path = result?.imagePath.orEmpty()
+    val base64 = result?.imageBase64.orEmpty()
+    val pathBitmap = rememberImageBitmap(path)
+    val base64Bitmap = remember(base64) {
+        if (base64.isNotBlank()) decodeBase64ToBitmap(base64) else null
+    }
+    return pathBitmap ?: base64Bitmap
+}
 
 @Composable
 fun GlassmorphicCard(

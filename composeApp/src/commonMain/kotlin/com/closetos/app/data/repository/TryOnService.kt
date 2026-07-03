@@ -9,12 +9,15 @@ object TryOnService {
         if (!forceRefresh) {
             val cached = ClosetRepository.getTryOnImagePath(outfit.id)
             if (cached != null) {
-                return TryOnResult(
-                    imageBase64 = "",
-                    provider = "cache",
-                    imagePath = cached,
-                    fromCache = true
-                )
+                if (isLocalImageFileValid(cached)) {
+                    return TryOnResult(
+                        imageBase64 = "",
+                        provider = "cache",
+                        imagePath = cached,
+                        fromCache = true
+                    )
+                }
+                ClosetRepository.invalidateTryOnCache(outfit.id)
             }
         }
 
@@ -31,10 +34,14 @@ object TryOnService {
         }
 
         val path = result.imagePath ?: saveBase64ImageToFile(result.imageBase64, "tryon_${outfit.id}")
-        if (path != null) {
+        if (path != null && isLocalImageFileValid(path)) {
             ClosetRepository.cacheTryOnImage(outfit.id, path)
             return result.copy(imagePath = path)
         }
-        return result
+        if (result.imageBase64.isNotBlank()) {
+            return result
+        }
+        showToast("Try-on image could not be saved")
+        return null
     }
 }

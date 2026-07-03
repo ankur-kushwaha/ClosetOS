@@ -47,7 +47,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 
-private const val DEFAULT_BACKEND_URL = "https://closetos.adboardtools.com"
+private const val DEFAULT_BACKEND_URL = "https://closet.adboardtools.com"
 
 private fun resolveBackendBaseUrl(): String = DEFAULT_BACKEND_URL
 
@@ -99,16 +99,29 @@ actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
     BackHandler(enabled = enabled, onBack = onBack)
 }
 
+private fun resolveLocalImageFile(path: String): File? {
+    if (path.isBlank()) return null
+    val context = PlatformStorage.applicationContext
+    val direct = File(path)
+    if (direct.isAbsolute && direct.exists()) return direct
+    if (context != null) {
+        val inFiles = File(context.filesDir, path)
+        if (inFiles.exists()) return inFiles
+    }
+    return if (direct.exists()) direct else null
+}
+
+actual fun isLocalImageFileValid(path: String): Boolean {
+    val file = resolveLocalImageFile(path) ?: return false
+    return file.length() > 100
+}
+
 @Composable
 actual fun rememberImageBitmap(path: String): ImageBitmap? {
     return remember(path) {
         try {
-            val file = File(path)
-            if (file.exists()) {
-                BitmapFactory.decodeFile(path)?.asImageBitmap()
-            } else {
-                null
-            }
+            val file = resolveLocalImageFile(path) ?: return@remember null
+            BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
         } catch (e: Exception) {
             null
         }
@@ -931,7 +944,9 @@ actual suspend fun saveBase64ImageToFile(base64: String, prefix: String): String
     val context = PlatformStorage.applicationContext ?: return null
     return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
+            if (base64.isBlank()) return@withContext null
             val pngBytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+            if (pngBytes.size < 100) return@withContext null
             val file = File(context.filesDir, "${prefix}_${System.currentTimeMillis()}.png")
             FileOutputStream(file).use { fos ->
                 fos.write(pngBytes)
@@ -1101,6 +1116,7 @@ actual suspend fun renderTryOn(
             }
 
             if (garmentsArray.length() == 0) {
+                lastTryOnError = "No garment images found on device. Re-digitize your wardrobe items."
                 return@withContext null
             }
 
@@ -1140,8 +1156,13 @@ actual suspend fun renderTryOn(
 
             val response = connection.inputStream.bufferedReader().use { it.readText() }
             val root = org.json.JSONObject(response)
+            val imageBase64 = root.optString("image_base64", "")
+            if (imageBase64.isBlank()) {
+                lastTryOnError = "Try-on API returned an empty image"
+                return@withContext null
+            }
             TryOnResult(
-                imageBase64 = root.getString("image_base64"),
+                imageBase64 = imageBase64,
                 provider = root.optString("provider", "gemini-3.1-flash-lite-image")
             )
         } catch (e: Exception) {

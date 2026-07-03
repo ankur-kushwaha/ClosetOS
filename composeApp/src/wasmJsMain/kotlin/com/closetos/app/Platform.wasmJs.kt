@@ -359,6 +359,8 @@ actual suspend fun generateTravelCapsule(
     preferredStyles: List<String>
 ): TravelCapsulePlan? = null
 
+actual fun isLocalImageFileValid(path: String): Boolean = false
+
 actual fun decodeBase64ToBitmap(base64: String): ImageBitmap? {
     return null
 }

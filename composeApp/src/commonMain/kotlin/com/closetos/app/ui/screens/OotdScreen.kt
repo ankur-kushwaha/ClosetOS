@@ -26,11 +26,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.closetos.app.*
 import com.closetos.app.data.model.Outfit
+import com.closetos.app.data.model.TryOnResult
 import com.closetos.app.data.repository.ClosetRepository
 import com.closetos.app.data.repository.TryOnService
 import com.closetos.app.ui.components.ElegantButton
 import com.closetos.app.ui.components.GlassmorphicCard
 import com.closetos.app.ui.components.TagChip
+import com.closetos.app.ui.components.rememberTryOnBitmap
 import com.closetos.app.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -76,7 +78,7 @@ fun OotdScreen() {
     // Reroll / try-on state
     var isRerolling by remember { mutableStateOf(false) }
     var showPremiumRerollDialog by remember { mutableStateOf(false) }
-    var tryOnImagePath by remember { mutableStateOf<String?>(null) }
+    var tryOnResult by remember { mutableStateOf<TryOnResult?>(null) }
     var isTryOnLoading by remember { mutableStateOf(false) }
 
     // Reset feedback state on outfit index change
@@ -87,16 +89,24 @@ fun OotdScreen() {
 
     LaunchedEffect(activeOutfit?.id) {
         val outfit = activeOutfit ?: return@LaunchedEffect
-        tryOnImagePath = null
+        tryOnResult = null
         val cached = ClosetRepository.getTryOnImagePath(outfit.id)
-        if (cached != null) {
-            tryOnImagePath = cached
+        if (cached != null && isLocalImageFileValid(cached)) {
+            tryOnResult = TryOnResult(
+                imageBase64 = "",
+                provider = "cache",
+                imagePath = cached,
+                fromCache = true
+            )
             return@LaunchedEffect
+        }
+        if (cached != null) {
+            ClosetRepository.invalidateTryOnCache(outfit.id)
         }
         isTryOnLoading = true
         val result = TryOnService.renderOutfit(outfit, forceRefresh = false)
         isTryOnLoading = false
-        tryOnImagePath = result?.imagePath
+        tryOnResult = result
     }
 
     Column(
@@ -261,9 +271,8 @@ fun OotdScreen() {
                         }
 
                         // Try-on render or garment fallback
-                        val displayTryOnPath = tryOnImagePath ?: ""
-                        val tryOnBitmap = rememberImageBitmap(displayTryOnPath)
-                        if (displayTryOnPath.isNotEmpty() && tryOnBitmap != null) {
+                        val tryOnBitmap = rememberTryOnBitmap(tryOnResult)
+                        if (tryOnBitmap != null) {
                             Image(
                                 bitmap = tryOnBitmap,
                                 contentDescription = "OOTD try-on render",
@@ -547,8 +556,8 @@ fun OotdScreen() {
                         scope.launch {
                             val result = TryOnService.renderOutfit(outfit, forceRefresh = true)
                             isRerolling = false
-                            if (result?.imagePath != null) {
-                                tryOnImagePath = result.imagePath
+                            if (result != null) {
+                                tryOnResult = result
                                 showToast("Try-on render complete!")
                             } else {
                                 showToast("Try-on render failed")

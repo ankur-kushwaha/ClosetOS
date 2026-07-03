@@ -22,7 +22,6 @@ import androidx.compose.ui.window.DialogProperties
 import com.closetos.app.data.model.Outfit
 import com.closetos.app.data.model.TryOnResult
 import com.closetos.app.data.repository.TryOnService
-import com.closetos.app.rememberImageBitmap
 import com.closetos.app.showToast
 import com.closetos.app.ui.theme.*
 import kotlinx.coroutines.launch
@@ -118,14 +117,23 @@ fun TryOnDialog(
                                 )
                             }
                         }
-                        !tryOnResult?.imagePath.isNullOrEmpty() -> {
-                            val bitmap = rememberImageBitmap(tryOnResult!!.imagePath!!)
+                        tryOnResult != null -> {
+                            val bitmap = rememberTryOnBitmap(tryOnResult)
                             if (bitmap != null) {
                                 Image(
                                     bitmap = bitmap,
                                     contentDescription = "Try-on render",
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Text(
+                                    text = "Try-on image could not be loaded. Tap Re-render to try again.",
+                                    fontFamily = OutfitFont,
+                                    fontSize = 13.sp,
+                                    color = TextMuted,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(24.dp)
                                 )
                             }
                         }
