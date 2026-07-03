@@ -10,44 +10,50 @@ from pipeline.model_loaders import ModelLoaders
 
 def main():
     print("Pre-downloading machine learning models for offline/container deployment...")
-    
+
     # Initialize loaders with CPU
     loaders = ModelLoaders("cpu")
-    
-    print("\n1. Loading Segment Anything (SAM)...")
-    loaders.get_sam_model()
-    
-    print("\n2. Loading Florence-2-base...")
-    loaders.get_florence_model()
-    
-    print("\n3. Loading FashionCLIP...")
-    try:
-        # This will download the sentence transformer weights or CLIP weights
-        get_fashion_clip_model("cpu")
-    except Exception as e:
-        print(f"Error caching FashionCLIP: {e}")
-        print("Retrying with Hugging Face transformers fallback...")
-        from transformers import CLIPModel, CLIPProcessor
-        CLIPModel.from_pretrained("patrickjohncyh/fashion-clip")
-        CLIPProcessor.from_pretrained("patrickjohncyh/fashion-clip")
-        
-    print("\n4. Loading YOLO-World...")
-    try:
-        loaders.get_yolo_world_model()
-    except Exception as e:
-        print(f"Error checking YOLO-World: {e}")
 
-    print("\n5. Initializing rembg cloth session...")
-    try:
-        loaders.get_rembg_session()
-    except Exception as e:
-        print(f"Error caching rembg session: {e}")
+    failures = []
 
-    print("\n6. Downloading RealESRGAN weights...")
-    try:
-        ensure_realesrgan_weights()
-    except Exception as e:
-        print(f"Error caching RealESRGAN weights: {e}")
+    def step(label, fn):
+        print(f"\n{label}...")
+        try:
+            fn()
+        except Exception as e:
+            print(f"Error caching {label}: {e}")
+            failures.append(label)
+
+    step("1. Loading Segment Anything (SAM)", loaders.get_sam_model)
+    step("2. Loading Florence-2-base", loaders.get_florence_model)
+
+    def load_fashion_clip():
+        try:
+            # This will download the sentence transformer weights or CLIP weights
+            get_fashion_clip_model("cpu")
+        except Exception as e:
+            print(f"Error caching FashionCLIP via fashion-clip package: {e}")
+            print("Retrying with Hugging Face transformers fallback...")
+            from transformers import CLIPModel, CLIPProcessor
+            CLIPModel.from_pretrained("patrickjohncyh/fashion-clip")
+            CLIPProcessor.from_pretrained("patrickjohncyh/fashion-clip")
+
+    step("3. Loading FashionCLIP", load_fashion_clip)
+    step("4. Loading YOLO-World", loaders.get_yolo_world_model)
+
+    def load_rembg():
+        # get_rembg_session() swallows its own errors and returns None on failure
+        if loaders.get_rembg_session() is None:
+            raise RuntimeError("rembg session could not be initialized")
+
+    step("5. Initializing rembg cloth session", load_rembg)
+    step("6. Downloading RealESRGAN weights", ensure_realesrgan_weights)
+
+    if failures:
+        print(f"\nModel caching FAILED for: {', '.join(failures)}")
+        print("Failing the build so a broken image is not deployed with models missing "
+              "from the cache (they would otherwise be downloaded on the first real request).")
+        sys.exit(1)
 
     print("\nModel caching complete! All models are verified and cached.")
 

@@ -18,3 +18,4 @@ google-genai>=1.0.0
 fashion-clip>=0.2.0
 python-dotenv>=1.0.0
 ultralytics
+rembg==2.0.61
