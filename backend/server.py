@@ -75,13 +75,17 @@ db_manager = DatabaseManager()
 # Background Thread Executor
 executor = ThreadPoolExecutor(max_workers=2)
 
-# Serialize GPU inference (FashionCLIP / Florence) — one request at a time
+# Serialize ML inference (FashionCLIP) — one request at a time
 _inference_lock = threading.Lock()
 
 # Determine PyTorch device acceleration
-device = "cuda" if torch.cuda.is_available() else "cpu"
-if device == "cpu" and torch.backends.mps.is_available():
-    device = "mps"
+device = os.getenv("TORCH_DEVICE", "").strip().lower()
+if device not in ("cpu", "cuda", "mps"):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cpu" and torch.backends.mps.is_available():
+        device = "mps"
+if device == "cpu":
+    torch.set_num_threads(max(1, (os.cpu_count() or 4) // 2))
 print(f"Using device: {device}")
 
 # Lazy-loaded model loaders instance
@@ -413,20 +417,17 @@ def embed_garment_crop(payload: CropPayload):
 
 @app.post("/yolo-world/extract-metadata")
 def extract_garment_metadata(payload: ExtractMetadataPayload):
-    """Label + pixel color + FashionCLIP (no Florence caption)."""
+    """Label + pixel color only (no embedding — that runs on finalize)."""
     try:
         from pipeline.florence_attrs import attrs_from_image
-        from pipeline.fashion_clip import encode_image
 
         crop_bytes = base64.b64decode(payload.crop_base64)
         image = Image.open(io.BytesIO(crop_bytes)).convert("RGBA")
         attrs = attrs_from_image(image, payload.label)
-        with _inference_lock:
-            embedding = encode_image(image, loaders.device)
 
         return {
             "attributes": _build_garment_attributes(
-                attrs, embedding, image, payload.label
+                attrs, [], image, payload.label
             )
         }
     except Exception as e:
@@ -437,12 +438,11 @@ def extract_garment_metadata(payload: ExtractMetadataPayload):
 
 @app.post("/yolo-world/extract-metadata/bulk")
 def extract_garment_metadata_bulk(payload: BulkMetadataPayload):
-    """Bulk light metadata — pixel color + label heuristics + serialized embeddings."""
+    """Bulk light metadata — pixel color + label heuristics only (CPU-friendly)."""
     if len(payload.items) > 64:
         raise HTTPException(status_code=400, detail="Maximum 64 items per bulk request")
 
     from pipeline.florence_attrs import attrs_from_image
-    from pipeline.fashion_clip import encode_image
 
     results = []
     for item in payload.items:
@@ -450,13 +450,11 @@ def extract_garment_metadata_bulk(payload: BulkMetadataPayload):
             crop_bytes = base64.b64decode(item.crop_base64)
             image = Image.open(io.BytesIO(crop_bytes)).convert("RGBA")
             attrs = attrs_from_image(image, item.label)
-            with _inference_lock:
-                embedding = encode_image(image, loaders.device)
             results.append({
                 "id": item.id,
                 "ok": True,
                 "attributes": _build_garment_attributes(
-                    attrs, embedding, image, item.label
+                    attrs, [], image, item.label
                 ),
             })
         except Exception as e:

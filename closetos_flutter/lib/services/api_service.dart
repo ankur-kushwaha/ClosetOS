@@ -270,7 +270,7 @@ class ApiService {
     }
   }
 
-  /// Light bulk metadata (label heuristics + pixel color + serialized embeddings).
+  /// Light bulk metadata (label heuristics + pixel color, no embedding).
   Future<Map<String, ExtractedAttributes>> extractMetadataBulk(
     List<({String id, String cropBase64, String label})> items,
   ) async {
@@ -278,9 +278,7 @@ class ApiService {
     if (items.isEmpty) return {};
 
     try {
-      final timeout = Duration(
-        seconds: 30 + items.length * 20,
-      );
+      final timeout = Duration(seconds: 15 + items.length * 2);
       final res = await _client
           .post(
             _uri('/yolo-world/extract-metadata/bulk'),
@@ -348,7 +346,7 @@ class ApiService {
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode(payload),
           )
-          .timeout(const Duration(minutes: 2));
+          .timeout(const Duration(minutes: 5));
 
       if (res.statusCode != 200) {
         lastError = 'Finalize failed (${res.statusCode}): ${res.body}';
