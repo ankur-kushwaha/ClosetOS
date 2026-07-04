@@ -26,9 +26,8 @@ class _IngestScreenState extends State<IngestScreen> {
 
   _IngestPhase _phase = _IngestPhase.import;
   bool _detecting = false;
-  bool _processing = false;
+  bool _fetchingMetadata = false;
   List<DetectedBox> _boxes = [];
-  List<IngestionItem?> _prepItems = [];
   List<IngestionItem> _reviewQueue = [];
   int _reviewIndex = 0;
   int _accepted = 0;
@@ -44,7 +43,7 @@ class _IngestScreenState extends State<IngestScreen> {
       : null;
 
   Future<void> _pickBulkPhotos() async {
-    if (_detecting || _processing) return;
+    if (_detecting) return;
 
     final picked = await _picker.pickMultiImage(imageQuality: 85);
     if (picked.isEmpty || !mounted) return;
@@ -52,7 +51,7 @@ class _IngestScreenState extends State<IngestScreen> {
     setState(() {
       _detecting = true;
       _boxes = [];
-      _prepItems = [];
+      _fetchingMetadata = false;
       _phase = _IngestPhase.import;
       _reviewQueue = [];
       _reviewIndex = 0;
@@ -91,89 +90,58 @@ class _IngestScreenState extends State<IngestScreen> {
     setState(() {
       _detecting = false;
       _boxes = allBoxes;
-      _processing = true;
-      _prepItems = List<IngestionItem?>.filled(allBoxes.length, null);
     });
-
-    await _prepareForReview(allBoxes);
   }
 
-  Future<void> _prepareForReview(List<DetectedBox> boxes) async {
-    final repo = context.read<WardrobeRepository>();
+  void _deleteBox(int index) {
+    if (_fetchingMetadata) return;
+    setState(() => _boxes.removeAt(index));
+  }
 
-    final prepared = await Future.wait(
-      List.generate(boxes.length, (i) {
-        final box = boxes[i];
-        return repo.prepareIngestionReview(
-          box,
-          onUpdate: (item) {
-            if (!mounted) return;
-            setState(() => _prepItems[i] = item);
-          },
-        ).then((item) {
-          if (mounted) setState(() => _prepItems[i] = item);
-          return item;
-        });
-      }),
-    );
+  Future<void> _startReview() async {
+    if (_boxes.isEmpty || _fetchingMetadata) return;
+
+    final repo = context.read<WardrobeRepository>();
+    final boxes = List.of(_boxes);
+
+    setState(() => _fetchingMetadata = true);
+
+    final metadata = await repo.fetchMetadataBulk(boxes);
+    if (!mounted) return;
+
+    final items = await Future.wait([
+      for (var i = 0; i < boxes.length; i++)
+        repo.ingestionItemFromBox(
+          boxes[i],
+          attributes: metadata[i],
+        ),
+    ]);
 
     if (!mounted) return;
 
-    final reviewItems = prepared.where((i) => i.status == 'review').toList();
-    final failed = prepared.where((i) => i.status == 'failed').length;
-
     setState(() {
-      _processing = false;
-      _prepItems = [];
-      _reviewQueue = reviewItems;
+      _reviewQueue = items;
       _reviewIndex = 0;
-      _phase =
-          reviewItems.isNotEmpty ? _IngestPhase.review : _IngestPhase.import;
+      _phase = _IngestPhase.review;
+      _boxes = [];
+      _fetchingMetadata = false;
     });
-
-    if (reviewItems.isEmpty && failed > 0 && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '$failed items could not be processed.',
-            style: AppTypography.ui(color: AppColors.surface),
-          ),
-        ),
-      );
-    }
   }
 
   void _acceptCurrent(ExtractedAttributes? editedAttrs) {
     final item = _currentReview;
     if (item == null) return;
 
-    if (editedAttrs != null) {
-      item.attributes = editedAttrs;
-    }
-
-    final hasNormalized = (item.normalizedBase64 ?? '').isNotEmpty &&
-        item.normalizedBase64 != item.cropBase64;
+    final attrs = editedAttrs ??
+        item.attributes ??
+        ExtractedAttributes.fromLabel(item.label ?? 'garment');
 
     setState(() {
       _accepted++;
       _reviewIndex++;
     });
 
-    final repo = context.read<WardrobeRepository>();
-    repo.finalizeIngestion(item, useNormalized: hasNormalized).then((result) {
-      if (!mounted) return;
-      if (result.status == 'failed') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              result.error ?? 'Could not save garment.',
-              style: AppTypography.ui(color: AppColors.surface),
-            ),
-          ),
-        );
-      }
-    });
-
+    context.read<WardrobeRepository>().enqueueFinalize(item, attrs);
     _checkReviewComplete();
   }
 
@@ -196,7 +164,7 @@ class _IngestScreenState extends State<IngestScreen> {
     if (!mounted) return;
 
     final parts = <String>[];
-    if (_accepted > 0) parts.add('$_accepted added');
+    if (_accepted > 0) parts.add('$_accepted saving in background');
     if (_rejected > 0) parts.add('$_rejected skipped');
 
     if (parts.isNotEmpty) {
@@ -215,7 +183,6 @@ class _IngestScreenState extends State<IngestScreen> {
     setState(() {
       _phase = _IngestPhase.import;
       _boxes = [];
-      _prepItems = [];
       _reviewQueue = [];
       _reviewIndex = 0;
       _accepted = 0;
@@ -242,11 +209,12 @@ class _IngestScreenState extends State<IngestScreen> {
             )
           : _ImportView(
               detecting: _detecting,
-              processing: _processing,
+              fetchingMetadata: _fetchingMetadata,
               foundCount: _foundCount,
               boxes: _boxes,
-              prepItems: _prepItems,
               onBulkPhotos: _pickBulkPhotos,
+              onDeleteBox: _deleteBox,
+              onContinue: _startReview,
             ),
     );
   }
@@ -257,25 +225,26 @@ class _IngestScreenState extends State<IngestScreen> {
 class _ImportView extends StatelessWidget {
   const _ImportView({
     required this.detecting,
-    required this.processing,
+    required this.fetchingMetadata,
     required this.foundCount,
     required this.boxes,
-    required this.prepItems,
     required this.onBulkPhotos,
+    required this.onDeleteBox,
+    required this.onContinue,
   });
 
   final bool detecting;
-  final bool processing;
+  final bool fetchingMetadata;
   final int foundCount;
   final List<DetectedBox> boxes;
-  final List<IngestionItem?> prepItems;
   final VoidCallback onBulkPhotos;
+  final void Function(int index) onDeleteBox;
+  final VoidCallback onContinue;
 
   @override
   Widget build(BuildContext context) {
-    final showGrid = detecting || processing || boxes.isNotEmpty;
+    final showGrid = detecting || boxes.isNotEmpty;
     final placeholderCount = detecting ? 6 : 0;
-    final readyCount = prepItems.where((i) => i?.status == 'review').length;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
@@ -291,22 +260,64 @@ class _ImportView extends StatelessWidget {
         ),
         const SizedBox(height: 20),
         _BulkPhotosCard(
-          onTap: detecting || processing ? null : onBulkPhotos,
-          busy: detecting || processing,
+          onTap: detecting ? null : onBulkPhotos,
+          busy: detecting,
         ),
         if (showGrid) ...[
           const SizedBox(height: 20),
           _StatusLine(
             detecting: detecting,
-            processing: processing,
+            fetchingMetadata: fetchingMetadata,
             count: foundCount,
-            readyCount: readyCount,
           ),
           const SizedBox(height: 16),
           _ItemGrid(
             boxes: boxes,
-            prepItems: prepItems,
             placeholderCount: placeholderCount,
+            onDeleteBox: fetchingMetadata ? null : onDeleteBox,
+          ),
+        ],
+        if (boxes.isNotEmpty && !detecting) ...[
+          const SizedBox(height: 20),
+          FilledButton(
+            onPressed: fetchingMetadata ? null : onContinue,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.clay500,
+              foregroundColor: AppColors.surface,
+              minimumSize: const Size.fromHeight(48),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            child: fetchingMetadata
+                ? Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.surface,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Analyzing $foundCount item${foundCount == 1 ? '' : 's'}…',
+                        style: AppTypography.ui(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  )
+                : Text(
+                    'Confirm & review $foundCount item${foundCount == 1 ? '' : 's'}',
+                    style: AppTypography.ui(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
           ),
         ],
       ],
@@ -370,15 +381,13 @@ class _BulkPhotosCard extends StatelessWidget {
 class _StatusLine extends StatelessWidget {
   const _StatusLine({
     required this.detecting,
-    required this.processing,
+    required this.fetchingMetadata,
     required this.count,
-    required this.readyCount,
   });
 
   final bool detecting;
-  final bool processing;
+  final bool fetchingMetadata;
   final int count;
-  final int readyCount;
 
   @override
   Widget build(BuildContext context) {
@@ -387,12 +396,10 @@ class _StatusLine extends StatelessWidget {
       text = count > 0
           ? '$count items found, and counting…'
           : 'Scanning your photos…';
-    } else if (processing) {
-      text = readyCount > 0
-          ? '$readyCount of $count ready — fetching metadata…'
-          : '$count items found — fetching metadata…';
+    } else if (fetchingMetadata) {
+      text = 'Analyzing colors & details for $count item${count == 1 ? '' : 's'}…';
     } else {
-      text = '$count items found';
+      text = '$count items found — remove any mistakes, then confirm';
     }
 
     return Row(
@@ -423,13 +430,13 @@ class _StatusLine extends StatelessWidget {
 class _ItemGrid extends StatelessWidget {
   const _ItemGrid({
     required this.boxes,
-    required this.prepItems,
     required this.placeholderCount,
+    this.onDeleteBox,
   });
 
   final List<DetectedBox> boxes;
-  final List<IngestionItem?> prepItems;
   final int placeholderCount;
+  final void Function(int index)? onDeleteBox;
 
   @override
   Widget build(BuildContext context) {
@@ -447,12 +454,9 @@ class _ItemGrid extends StatelessWidget {
       itemCount: total,
       itemBuilder: (_, i) {
         if (i < boxes.length) {
-          final prep = i < prepItems.length ? prepItems[i] : null;
-          final processing = prep == null || prep.status == 'processing';
           return _GridThumbnail(
             box: boxes[i],
-            processing: processing,
-            stepLabel: prep?.stepLabel,
+            onDelete: onDeleteBox != null ? () => onDeleteBox!(i) : null,
           );
         }
         return const _GridPlaceholder();
@@ -464,13 +468,11 @@ class _ItemGrid extends StatelessWidget {
 class _GridThumbnail extends StatelessWidget {
   const _GridThumbnail({
     required this.box,
-    this.processing = false,
-    this.stepLabel,
+    this.onDelete,
   });
 
   final DetectedBox box;
-  final bool processing;
-  final String? stepLabel;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -494,38 +496,44 @@ class _GridThumbnail extends StatelessWidget {
                   baseColor: AppColors.surface,
                   opacity: 0.35,
                 ),
-          if (processing)
-            ColoredBox(
-              color: AppColors.ink900.withValues(alpha: 0.5),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppColors.surface,
-                      ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              color: AppColors.ink900.withValues(alpha: 0.65),
+              child: Text(
+                box.label,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTypography.ui(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.surface,
+                ),
+              ),
+            ),
+          ),
+          if (onDelete != null)
+            Positioned(
+              top: 4,
+              right: 4,
+              child: Material(
+                color: AppColors.ink900.withValues(alpha: 0.55),
+                shape: const CircleBorder(),
+                child: InkWell(
+                  onTap: onDelete,
+                  customBorder: const CircleBorder(),
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(
+                      Icons.close,
+                      size: 14,
+                      color: AppColors.surface,
                     ),
-                    if (stepLabel != null && stepLabel!.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                        child: Text(
-                          stepLabel!,
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppTypography.ui(
-                            fontSize: 9,
-                            color: AppColors.surface,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -688,48 +696,48 @@ class _ReviewCardState extends State<_ReviewCard> {
   late TextEditingController _patternCtrl;
   late TextEditingController _fitCtrl;
 
-  ExtractedAttributes? get editedAttributes {
-    final base = widget.item.attributes;
-    if (base == null) return null;
-    return base.copyWith(
-      subcategory: _subcategoryCtrl.text.trim(),
-      category: _categoryCtrl.text.trim(),
-      colorName: _colorCtrl.text.trim(),
-      material: _materialCtrl.text.trim(),
-      pattern: _patternCtrl.text.trim(),
-      fit: _fitCtrl.text.trim(),
-    );
+  ExtractedAttributes get _baseAttrs =>
+      widget.item.attributes ??
+      ExtractedAttributes.fromLabel(widget.item.label ?? 'Garment');
+
+  ExtractedAttributes? get editedAttributes => _baseAttrs.copyWith(
+        subcategory: _subcategoryCtrl.text.trim(),
+        category: _categoryCtrl.text.trim(),
+        colorName: _colorCtrl.text.trim(),
+        material: _materialCtrl.text.trim(),
+        pattern: _patternCtrl.text.trim(),
+        fit: _fitCtrl.text.trim(),
+      );
+
+  void _syncControllers(ExtractedAttributes attrs) {
+    _subcategoryCtrl.text = attrs.subcategory.isNotEmpty
+        ? attrs.subcategory
+        : (widget.item.label ?? '');
+    _categoryCtrl.text = attrs.category;
+    _colorCtrl.text = attrs.colorName;
+    _materialCtrl.text = attrs.material;
+    _patternCtrl.text = attrs.pattern;
+    _fitCtrl.text = attrs.fit;
   }
 
   @override
   void initState() {
     super.initState();
-    final attrs = widget.item.attributes;
-    _subcategoryCtrl = TextEditingController(
-      text: attrs?.subcategory.isNotEmpty == true
-          ? attrs!.subcategory
-          : (widget.item.label ?? ''),
-    );
-    _categoryCtrl = TextEditingController(text: attrs?.category ?? '');
-    _colorCtrl = TextEditingController(text: attrs?.colorName ?? '');
-    _materialCtrl = TextEditingController(text: attrs?.material ?? '');
-    _patternCtrl = TextEditingController(text: attrs?.pattern ?? '');
-    _fitCtrl = TextEditingController(text: attrs?.fit ?? '');
+    final attrs = _baseAttrs;
+    _subcategoryCtrl = TextEditingController();
+    _categoryCtrl = TextEditingController();
+    _colorCtrl = TextEditingController();
+    _materialCtrl = TextEditingController();
+    _patternCtrl = TextEditingController();
+    _fitCtrl = TextEditingController();
+    _syncControllers(attrs);
   }
 
   @override
   void didUpdateWidget(covariant _ReviewCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.item.id != widget.item.id) {
-      final attrs = widget.item.attributes;
-      _subcategoryCtrl.text = attrs?.subcategory.isNotEmpty == true
-          ? attrs!.subcategory
-          : (widget.item.label ?? '');
-      _categoryCtrl.text = attrs?.category ?? '';
-      _colorCtrl.text = attrs?.colorName ?? '';
-      _materialCtrl.text = attrs?.material ?? '';
-      _patternCtrl.text = attrs?.pattern ?? '';
-      _fitCtrl.text = attrs?.fit ?? '';
+      _syncControllers(_baseAttrs);
     }
   }
 
@@ -746,9 +754,8 @@ class _ReviewCardState extends State<_ReviewCard> {
 
   @override
   Widget build(BuildContext context) {
-    final imageB64 = widget.item.normalizedBase64?.isNotEmpty == true
-        ? widget.item.normalizedBase64!
-        : (widget.item.cropBase64 ?? '');
+    final imageB64 = widget.item.cropBase64 ?? '';
+    final label = widget.item.label ?? 'Garment';
 
     return Opacity(
       opacity: widget.interactive ? 1 : 0.55,
@@ -773,16 +780,44 @@ class _ReviewCardState extends State<_ReviewCard> {
           children: [
             Expanded(
               flex: 10,
-              child: imageB64.isNotEmpty
-                  ? Image.memory(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (imageB64.isNotEmpty)
+                    Image.memory(
                       base64Decode(imageB64),
                       fit: BoxFit.contain,
                       gaplessPlayback: true,
                     )
-                  : const StripeBackground(
+                  else
+                    const StripeBackground(
                       baseColor: AppColors.surface,
                       opacity: 0.35,
                     ),
+                  Positioned(
+                    left: 12,
+                    top: 12,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.ink900.withValues(alpha: 0.7),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        label,
+                        style: AppTypography.ui(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.surface,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
             if (widget.interactive)
               Flexible(
@@ -851,9 +886,9 @@ class _ReviewCardState extends State<_ReviewCard> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                 child: Text(
-                  widget.item.attributes?.subcategory.isNotEmpty == true
-                      ? widget.item.attributes!.subcategory
-                      : (widget.item.label ?? 'Garment'),
+                  _baseAttrs.subcategory.isNotEmpty
+                      ? _baseAttrs.subcategory
+                      : label,
                   style: AppTypography.ui(
                     fontSize: 17,
                     fontWeight: FontWeight.w600,

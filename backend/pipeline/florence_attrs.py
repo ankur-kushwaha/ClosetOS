@@ -6,6 +6,44 @@ from PIL import Image
 import torch
 
 
+def attrs_from_label(detection_label: str) -> Dict[str, Any]:
+    """Lightweight attribute guess from YOLO label only (no image)."""
+    od_label = detection_label.lower()
+    category = _infer_category(od_label, "")
+    subcategory = _infer_subcategory(od_label, "", category)
+    return {
+        "category": category,
+        "subcategory": subcategory,
+        "colorName": "Unknown",
+        "colors": ["gray"],
+        "material": "Organic Cotton",
+        "pattern": "solid",
+        "fit": "Regular",
+        "florence_caption": detection_label,
+    }
+
+
+def attrs_from_image(image: Image.Image, detection_label: str) -> Dict[str, Any]:
+    """Lightweight attrs: YOLO label heuristics + pixel color (no Florence caption)."""
+    od_label = detection_label.lower()
+    category = _infer_category(od_label, od_label)
+    subcategory = _infer_subcategory(od_label, od_label, category)
+    colors = _infer_colors(od_label, image)
+    pattern = _infer_pattern(od_label)
+    material = _infer_material(od_label)
+    fit = _infer_fit(od_label)
+    return {
+        "category": category,
+        "subcategory": subcategory,
+        "colorName": colors[0].capitalize() if colors else "Unknown",
+        "colors": colors,
+        "material": material,
+        "pattern": pattern,
+        "fit": fit,
+        "florence_caption": detection_label,
+    }
+
+
 def extract_attributes(
     normalized_image: Image.Image,
     detection_label: str,
@@ -102,19 +140,49 @@ def _infer_colors(caption: str, image: Image.Image) -> List[str]:
     found = [c for c in color_words if re.search(rf"\b{c}\b", text)]
     if found:
         return found[:3]
-    # Pixel average fallback
+    return _dominant_colors_from_pixels(image)
+
+
+def _dominant_colors_from_pixels(image: Image.Image) -> List[str]:
+    """Map masked garment pixels to a color name (no ML)."""
     import numpy as np
-    arr = np.array(image.convert("RGB"))
-    avg = arr.reshape(-1, 3).mean(axis=0)
+
+    rgba = image.convert("RGBA")
+    arr = np.array(rgba)
+    if arr.size == 0:
+        return ["gray"]
+
+    alpha = arr[:, :, 3]
+    mask = alpha > 10 if alpha.max() > 10 else np.ones(arr.shape[:2], dtype=bool)
+    pixels = arr[mask][:, :3] if mask.any() else arr[:, :, :3].reshape(-1, 3)
+    if pixels.size == 0:
+        return ["gray"]
+
+    avg = pixels.mean(axis=0)
     r, g, b = avg
+
     if r > 200 and g > 200 and b > 200:
         return ["white"]
-    if r < 60 and g < 60 and b < 60:
+    if r < 55 and g < 55 and b < 55:
         return ["black"]
-    if b > r and b > g:
-        return ["blue"]
-    if g > r and g > b:
-        return ["green"]
+    if abs(r - g) < 25 and abs(g - b) < 25:
+        if r > 160:
+            return ["gray"]
+        return ["charcoal"] if r < 100 else ["gray"]
+    if b > r + 20 and b > g + 10:
+        return ["navy"] if b < 120 and r < 80 else ["blue"]
+    if g > r + 15 and g > b + 15:
+        return ["olive"] if r > 90 else ["green"]
+    if r > g + 20 and r > b + 20:
+        if r > 160 and g < 100:
+            return ["red"]
+        if g > 80:
+            return ["orange"] if g > 120 else ["brown"]
+        return ["burgundy"] if r < 140 else ["red"]
+    if r > 150 and g > 120 and b < 90:
+        return ["beige"] if r > 190 else ["tan"]
+    if r > 100 and g > 80 and b > 60:
+        return ["brown"]
     return ["gray"]
 
 

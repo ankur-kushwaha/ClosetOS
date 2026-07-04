@@ -326,6 +326,39 @@ class ExtractedAttributes {
   final List<double> labColor;
   final String florenceCaption;
 
+  static String categoryFromLabel(String label) {
+    final text = label.toLowerCase();
+    if (RegExp(r'sneaker|loafer|boot|shoe|sandal|heel|footwear').hasMatch(text)) {
+      return 'Shoes';
+    }
+    if (RegExp(r'jacket|coat|blazer|overcoat|parka|cardigan').hasMatch(text)) {
+      return 'Outerwear';
+    }
+    if (RegExp(r'pants|jeans|trousers|shorts|skirt|leggings').hasMatch(text)) {
+      return 'Bottom';
+    }
+    return 'Top';
+  }
+
+  factory ExtractedAttributes.fromLabel(String label) {
+    final category = categoryFromLabel(label);
+    return ExtractedAttributes(
+      category: category,
+      subcategory: label,
+      colorName: '',
+      material: '',
+      pattern: '',
+      fit: '',
+      seasons: category == 'Outerwear'
+          ? const ['Autumn', 'Winter', 'Spring']
+          : const ['Spring', 'Summer', 'Autumn'],
+      formalityScore: 0.5,
+      silhouette: label.split(' ').last,
+      embedding: const [],
+      florenceCaption: label,
+    );
+  }
+
   factory ExtractedAttributes.fromJson(Map<String, dynamic> json) =>
       ExtractedAttributes(
         category: json['category'] as String? ?? 'Top',

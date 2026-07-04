@@ -5,6 +5,7 @@ import time
 import uuid
 import base64
 import asyncio
+import threading
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 
@@ -73,6 +74,9 @@ db_manager = DatabaseManager()
 
 # Background Thread Executor
 executor = ThreadPoolExecutor(max_workers=2)
+
+# Serialize GPU inference (FashionCLIP / Florence) — one request at a time
+_inference_lock = threading.Lock()
 
 # Determine PyTorch device acceleration
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -224,7 +228,7 @@ class PrecomputedAttributes(BaseModel):
     seasons: List[str]
     formalityScore: float
     silhouette: str
-    embedding: List[float]
+    embedding: List[float] = []
     florenceCaption: str = ""
 
 
@@ -241,6 +245,16 @@ class FinalizePayload(BaseModel):
 class ExtractMetadataPayload(BaseModel):
     crop_base64: str
     label: str
+
+
+class BulkMetadataItem(BaseModel):
+    id: str
+    crop_base64: str
+    label: str
+
+
+class BulkMetadataPayload(BaseModel):
+    items: List[BulkMetadataItem]
 
 class FlorencePayload(BaseModel):
     image_base64: str
@@ -380,19 +394,35 @@ def _build_garment_attributes(
     })
 
 
-@app.post("/yolo-world/extract-metadata")
-def extract_garment_metadata(payload: ExtractMetadataPayload):
-    """Florence-2 + FashionCLIP on the raw crop (runs in parallel with normalization)."""
+@app.post("/yolo-world/embed")
+def embed_garment_crop(payload: CropPayload):
+    """FashionCLIP embedding only — serialized via inference lock."""
     try:
-        from pipeline.florence_attrs import extract_attributes
         from pipeline.fashion_clip import encode_image
 
         crop_bytes = base64.b64decode(payload.crop_base64)
         image = Image.open(io.BytesIO(crop_bytes)).convert("RGBA")
-        device = loaders.device
+        with _inference_lock:
+            embedding = encode_image(image, loaders.device)
+        return {"embedding": _sanitize_for_json(embedding)}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
-        attrs = extract_attributes(image.convert("RGB"), payload.label, device, loaders)
-        embedding = encode_image(image, device)
+
+@app.post("/yolo-world/extract-metadata")
+def extract_garment_metadata(payload: ExtractMetadataPayload):
+    """Label + pixel color + FashionCLIP (no Florence caption)."""
+    try:
+        from pipeline.florence_attrs import attrs_from_image
+        from pipeline.fashion_clip import encode_image
+
+        crop_bytes = base64.b64decode(payload.crop_base64)
+        image = Image.open(io.BytesIO(crop_bytes)).convert("RGBA")
+        attrs = attrs_from_image(image, payload.label)
+        with _inference_lock:
+            embedding = encode_image(image, loaders.device)
 
         return {
             "attributes": _build_garment_attributes(
@@ -403,6 +433,36 @@ def extract_garment_metadata(payload: ExtractMetadataPayload):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/yolo-world/extract-metadata/bulk")
+def extract_garment_metadata_bulk(payload: BulkMetadataPayload):
+    """Bulk light metadata — pixel color + label heuristics + serialized embeddings."""
+    if len(payload.items) > 64:
+        raise HTTPException(status_code=400, detail="Maximum 64 items per bulk request")
+
+    from pipeline.florence_attrs import attrs_from_image
+    from pipeline.fashion_clip import encode_image
+
+    results = []
+    for item in payload.items:
+        try:
+            crop_bytes = base64.b64decode(item.crop_base64)
+            image = Image.open(io.BytesIO(crop_bytes)).convert("RGBA")
+            attrs = attrs_from_image(image, item.label)
+            with _inference_lock:
+                embedding = encode_image(image, loaders.device)
+            results.append({
+                "id": item.id,
+                "ok": True,
+                "attributes": _build_garment_attributes(
+                    attrs, embedding, image, item.label
+                ),
+            })
+        except Exception as e:
+            results.append({"id": item.id, "ok": False, "error": str(e)})
+
+    return {"items": results}
 
 
 @app.post("/yolo-world/gpt-normalize")
@@ -425,7 +485,6 @@ def gpt_normalize_crop(payload: CropPayload):
 @app.post("/yolo-world/finalize")
 def yolo_world_finalize(payload: FinalizePayload):
     try:
-        from pipeline.florence_attrs import extract_attributes
         from pipeline.fashion_clip import encode_image
         from pipeline.orchestrator import map_to_try_on_category, map_to_try_on_subcategory
         
@@ -438,19 +497,18 @@ def yolo_world_finalize(payload: FinalizePayload):
             attrs = {
                 "category": pre.category,
                 "subcategory": pre.subcategory,
-                "colorName": pre.colorName,
-                "colors": [pre.colorName.lower()],
+                "colorName": pre.colorName or "Unknown",
+                "colors": [pre.colorName.lower() if pre.colorName else "gray"],
                 "material": pre.material,
                 "pattern": pre.pattern,
                 "fit": pre.fit,
-                "florence_caption": pre.florenceCaption,
+                "florence_caption": pre.florenceCaption or payload.label,
             }
-            embedding = np.array(pre.embedding)
-            response_attrs = pre.model_dump()
-        else:
-            device = loaders.device
-            attrs = extract_attributes(image.convert("RGB"), payload.label, device, loaders)
-            embedding = encode_image(image, device)
+            if pre.embedding:
+                embedding = np.array(pre.embedding)
+            else:
+                with _inference_lock:
+                    embedding = encode_image(image, loaders.device)
             response_attrs = _build_garment_attributes(
                 attrs,
                 embedding,
@@ -458,6 +516,21 @@ def yolo_world_finalize(payload: FinalizePayload):
                 payload.label,
                 brand=payload.brand or "Inferred",
                 price=payload.price or 150.0,
+                normalization_provider="none",
+            )
+        else:
+            from pipeline.florence_attrs import attrs_from_image
+            attrs = attrs_from_image(image, payload.label)
+            with _inference_lock:
+                embedding = encode_image(image, loaders.device)
+            response_attrs = _build_garment_attributes(
+                attrs,
+                embedding,
+                image,
+                payload.label,
+                brand=payload.brand or "Inferred",
+                price=payload.price or 150.0,
+                normalization_provider="none",
             )
         
         # Create file assets on disk

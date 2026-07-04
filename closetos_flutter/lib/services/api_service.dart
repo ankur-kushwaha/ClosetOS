@@ -270,6 +270,59 @@ class ApiService {
     }
   }
 
+  /// Light bulk metadata (label heuristics + pixel color + serialized embeddings).
+  Future<Map<String, ExtractedAttributes>> extractMetadataBulk(
+    List<({String id, String cropBase64, String label})> items,
+  ) async {
+    lastError = null;
+    if (items.isEmpty) return {};
+
+    try {
+      final timeout = Duration(
+        seconds: 30 + items.length * 20,
+      );
+      final res = await _client
+          .post(
+            _uri('/yolo-world/extract-metadata/bulk'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'items': items
+                  .map(
+                    (i) => {
+                      'id': i.id,
+                      'crop_base64': i.cropBase64,
+                      'label': i.label,
+                    },
+                  )
+                  .toList(),
+            }),
+          )
+          .timeout(timeout);
+
+      if (res.statusCode != 200) {
+        lastError = 'Bulk metadata failed (${res.statusCode})';
+        return {};
+      }
+
+      final root = jsonDecode(res.body) as Map<String, dynamic>;
+      final rows = root['items'] as List<dynamic>;
+      final out = <String, ExtractedAttributes>{};
+      for (final row in rows) {
+        final map = row as Map<String, dynamic>;
+        final id = map['id'] as String;
+        if (map['ok'] == true && map['attributes'] != null) {
+          out[id] = ExtractedAttributes.fromJson(
+            map['attributes'] as Map<String, dynamic>,
+          );
+        }
+      }
+      return out;
+    } catch (e) {
+      lastError = e.toString();
+      return {};
+    }
+  }
+
   Future<Garment?> finalizeGarment({
     required String imageBase64,
     required String cropBase64,

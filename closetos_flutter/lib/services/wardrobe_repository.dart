@@ -23,6 +23,8 @@ class WardrobeRepository extends ChangeNotifier {
   List<Outfit> outfits = [];
   UserTaste taste = UserTaste();
   final List<IngestionItem> ingestionQueue = [];
+  final _finalizeQueue = <_FinalizeRequest>[];
+  bool _finalizeRunning = false;
   Map<String, String> tryOnCache = {};
   String? digitalTwinPath;
 
@@ -336,62 +338,71 @@ class WardrobeRepository extends ChangeNotifier {
     return result;
   }
 
-  Future<IngestionItem> prepareIngestionReview(
+  Future<Map<int, ExtractedAttributes>> fetchMetadataBulk(
+    List<DetectedBox> boxes,
+  ) async {
+    if (boxes.isEmpty) return {};
+
+    final items = <({String id, String cropBase64, String label})>[];
+    for (var i = 0; i < boxes.length; i++) {
+      items.add((id: '$i', cropBase64: boxes[i].cropBase64, label: boxes[i].label));
+    }
+
+    final byId = await _api.extractMetadataBulk(items);
+    if (byId.isEmpty && _api.lastError != null) {
+      lastError = _api.lastError;
+    }
+
+    final out = <int, ExtractedAttributes>{};
+    byId.forEach((id, attrs) {
+      final index = int.tryParse(id);
+      if (index != null) out[index] = attrs;
+    });
+    notifyListeners();
+    return out;
+  }
+
+  Future<IngestionItem> ingestionItemFromBox(
     DetectedBox box, {
-    void Function(IngestionItem)? onUpdate,
-  }) async {
+    ExtractedAttributes? attributes,
+  }) {
     final item = IngestionItem(
       id: _uuid.v4(),
-      status: 'processing',
-      stepLabel: 'Fetching metadata',
-      progress: 0.2,
+      status: 'review',
+      stepLabel: 'Awaiting review',
+      progress: 0.85,
       label: box.label,
       cropBase64: box.cropBase64,
       sourceImageId: box.sourceImageId,
+      attributes: attributes ?? ExtractedAttributes.fromLabel(box.label),
     );
     ingestionQueue.add(item);
-    onUpdate?.call(item);
     notifyListeners();
-
-    try {
-      final results = await Future.wait([
-        _api.normalizeGarment(box.cropBase64, box.label),
-        _api.extractMetadata(box.cropBase64, box.label),
-      ]);
-      final normalized = results[0] as String?;
-      final metadata = results[1] as ExtractedAttributes?;
-
-      item.normalizedBase64 = normalized;
-      item.attributes = metadata;
-      item.status = 'review';
-      item.stepLabel = 'Awaiting review';
-      item.progress = 0.85;
-      onUpdate?.call(item);
-      notifyListeners();
-    } catch (e) {
-      item.status = 'failed';
-      item.error = e.toString();
-      item.stepLabel = 'Failed';
-      onUpdate?.call(item);
-      lastError = e.toString();
-      ingestionQueue.removeWhere((i) => i.id == item.id);
-      notifyListeners();
-    }
-    return item;
+    return Future.value(item);
   }
 
-  Future<List<IngestionItem>> prepareIngestionBatch(
-    List<DetectedBox> boxes, {
-    void Function(IngestionItem)? onUpdate,
-  }) {
-    return Future.wait(
-      boxes.map((box) => prepareIngestionReview(box, onUpdate: onUpdate)),
-    );
+  void enqueueFinalize(IngestionItem item, ExtractedAttributes attributes) {
+    item.attributes = attributes;
+    _finalizeQueue.add(_FinalizeRequest(item, attributes));
+    _drainFinalizeQueue();
+  }
+
+  Future<void> _drainFinalizeQueue() async {
+    if (_finalizeRunning) return;
+    _finalizeRunning = true;
+    try {
+      while (_finalizeQueue.isNotEmpty) {
+        final req = _finalizeQueue.removeAt(0);
+        await finalizeIngestion(req.item, attributes: req.attributes);
+      }
+    } finally {
+      _finalizeRunning = false;
+    }
   }
 
   Future<IngestionItem> finalizeIngestion(
     IngestionItem item, {
-    required bool useNormalized,
+    ExtractedAttributes? attributes,
     void Function(IngestionItem)? onUpdate,
   }) async {
     final cropBase64 = item.cropBase64;
@@ -405,10 +416,6 @@ class WardrobeRepository extends ChangeNotifier {
       return item;
     }
 
-    final imageBase64 = useNormalized
-        ? (item.normalizedBase64 ?? cropBase64)
-        : cropBase64;
-
     item.status = 'processing';
     item.stepLabel = 'Saving';
     item.progress = 0.9;
@@ -416,14 +423,12 @@ class WardrobeRepository extends ChangeNotifier {
     notifyListeners();
 
     try {
-      var metadata = item.attributes;
-      if (metadata == null) {
-        metadata = await _api.extractMetadata(cropBase64, item.label ?? 'garment');
-        item.attributes = metadata;
-      }
+      final metadata = attributes ??
+          item.attributes ??
+          ExtractedAttributes.fromLabel(item.label ?? 'garment');
 
       final result = await _api.finalizeGarment(
-        imageBase64: imageBase64,
+        imageBase64: cropBase64,
         cropBase64: cropBase64,
         label: item.label ?? 'garment',
         sourceImageId: item.sourceImageId,
@@ -550,4 +555,11 @@ class WardrobeRepository extends ChangeNotifier {
   }
 
   Future<WeatherInfo> fetchWeather() => WeatherService.fetch();
+}
+
+class _FinalizeRequest {
+  _FinalizeRequest(this.item, this.attributes);
+
+  final IngestionItem item;
+  final ExtractedAttributes attributes;
 }
