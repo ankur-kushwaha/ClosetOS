@@ -365,6 +365,36 @@ class ExtractedAttributes {
         'embedding': embedding,
         'florenceCaption': florenceCaption,
       };
+
+  ExtractedAttributes copyWith({
+    String? category,
+    String? subcategory,
+    String? colorName,
+    String? material,
+    String? pattern,
+    String? fit,
+    List<String>? seasons,
+    double? formalityScore,
+    String? silhouette,
+    List<double>? embedding,
+    List<double>? labColor,
+    String? florenceCaption,
+  }) {
+    return ExtractedAttributes(
+      category: category ?? this.category,
+      subcategory: subcategory ?? this.subcategory,
+      colorName: colorName ?? this.colorName,
+      material: material ?? this.material,
+      pattern: pattern ?? this.pattern,
+      fit: fit ?? this.fit,
+      seasons: seasons ?? this.seasons,
+      formalityScore: formalityScore ?? this.formalityScore,
+      silhouette: silhouette ?? this.silhouette,
+      embedding: embedding ?? this.embedding,
+      labColor: labColor ?? this.labColor,
+      florenceCaption: florenceCaption ?? this.florenceCaption,
+    );
+  }
 }
 
 class TravelDayOutfit {

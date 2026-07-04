@@ -63,6 +63,25 @@ MIN_IMAGE_DIMENSION = 256
 STORAGE_DIR = "storage"
 GARMENTS_DIR = os.path.join(STORAGE_DIR, "garments")
 
+# Cloudflare R2 (S3-compatible) — leave blank to use local disk fallback
+# Prefer CLOUDFLARE_R2_* names; R2_* aliases supported for compatibility.
+R2_ENDPOINT = _env("CLOUDFLARE_R2_ENDPOINT", _env("R2_ENDPOINT", "")).rstrip("/")
+if not R2_ENDPOINT:
+    _account_id = _env("R2_ACCOUNT_ID", "")
+    if _account_id:
+        R2_ENDPOINT = f"https://{_account_id}.r2.cloudflarestorage.com"
+
+R2_ACCESS_KEY_ID = _env("CLOUDFLARE_R2_ACCESS_KEY_ID", _env("R2_ACCESS_KEY_ID", ""))
+R2_SECRET_ACCESS_KEY = _env(
+    "CLOUDFLARE_R2_SECRET_ACCESS_KEY", _env("R2_SECRET_ACCESS_KEY", "")
+)
+R2_BUCKET_NAME = _env("CLOUDFLARE_R2_BUCKET_NAME", _env("R2_BUCKET_NAME", ""))
+R2_PUBLIC_URL = _env(
+    "CLOUDFLARE_R2_PUBLIC_URL", _env("R2_PUBLIC_URL", "")
+).rstrip("/")  # e.g. https://images.yourdomain.com
+
+API_BASE_URL = _env("API_BASE_URL", "http://localhost:8000").rstrip("/")
+
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent
 MODELS_DIR = _env("MODELS_DIR", str(_BACKEND_ROOT / ".models"))
 YOLO_MODEL = _env("YOLO_MODEL", "yolov8s-worldv2.pt")

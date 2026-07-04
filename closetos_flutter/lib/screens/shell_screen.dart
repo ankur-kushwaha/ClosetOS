@@ -150,15 +150,20 @@ class _ShellScreenState extends State<ShellScreen> {
                 ),
               ),
             ),
-      body: IndexedStack(
-        index: _index,
-        children: [
-          const OotdScreen(),
-          const IngestScreen(),
-          WardrobeScreen(onAddGarment: () => setState(() => _index = 1)),
-          const LookbookScreen(),
-          const TravelScreen(),
-        ],
+      body: SafeArea(
+        bottom: false,
+        child: IndexedStack(
+          index: _index,
+          children: [
+            const OotdScreen(),
+            IngestScreen(
+              onReviewComplete: () => setState(() => _index = 2),
+            ),
+            WardrobeScreen(onAddGarment: () => setState(() => _index = 1)),
+            const LookbookScreen(),
+            const TravelScreen(),
+          ],
+        ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,

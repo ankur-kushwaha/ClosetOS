@@ -19,11 +19,15 @@ Future<void> main() async {
     api.setAuthToken(storage.authToken);
   }
 
-  final auth = AuthService(storage: storage, api: api);
-  await auth.init();
-
   final repo = WardrobeRepository(storage: storage, api: api);
   await repo.init();
+
+  final auth = AuthService(
+    storage: storage,
+    api: api,
+    onAuthenticated: repo.syncWithCloud,
+  );
+  await auth.init();
 
   runApp(ClosetOSApp(
     storage: storage,

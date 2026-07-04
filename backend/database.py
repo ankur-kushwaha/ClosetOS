@@ -66,6 +66,21 @@ class DatabaseManager:
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         );
                     """)
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS wardrobe_items (
+                            item_id UUID PRIMARY KEY,
+                            user_id UUID NOT NULL,
+                            garment_json TEXT NOT NULL,
+                            image_url TEXT,
+                            straightened_image_url TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        );
+                    """)
+                    cur.execute("""
+                        CREATE INDEX IF NOT EXISTS idx_wardrobe_items_user
+                        ON wardrobe_items (user_id);
+                    """)
                 conn.commit()
                 print("PostgreSQL database initialized successfully!")
             except Exception as e:
@@ -101,6 +116,21 @@ class DatabaseManager:
                         onboarding_completed INTEGER DEFAULT 0,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS wardrobe_items (
+                        item_id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        garment_json TEXT NOT NULL,
+                        image_url TEXT,
+                        straightened_image_url TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_wardrobe_items_user
+                    ON wardrobe_items (user_id);
                 """)
                 conn.commit()
                 print("SQLite database initialized successfully!")
@@ -419,6 +449,139 @@ class DatabaseManager:
 
         scored_garments.sort(key=lambda x: x["similarity_score"], reverse=True)
         return scored_garments[:limit]
+
+    def get_wardrobe_items(self, user_id: str) -> List[Dict[str, Any]]:
+        conn = self.get_connection()
+        items = []
+        try:
+            if self.db_type == "postgres":
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT item_id, garment_json, image_url, straightened_image_url,
+                               created_at, updated_at
+                        FROM wardrobe_items WHERE user_id = %s
+                        ORDER BY updated_at DESC;
+                        """,
+                        (user_id,),
+                    )
+                    rows = cur.fetchall()
+                for row in rows:
+                    items.append(self._wardrobe_row_to_dict(row, is_postgres=True))
+            else:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT item_id, garment_json, image_url, straightened_image_url,
+                           created_at, updated_at
+                    FROM wardrobe_items WHERE user_id = ?
+                    ORDER BY updated_at DESC;
+                    """,
+                    (user_id,),
+                )
+                for row in cur.fetchall():
+                    items.append(self._wardrobe_row_to_dict(row, is_postgres=False))
+        except Exception as e:
+            print(f"Error fetching wardrobe items: {e}")
+        finally:
+            conn.close()
+        return items
+
+    def _wardrobe_row_to_dict(self, row, is_postgres: bool) -> Dict[str, Any]:
+        if is_postgres:
+            garment = json.loads(row[1])
+            garment["id"] = str(row[0])
+            if row[2]:
+                garment["imagePath"] = row[2]
+            if row[3]:
+                garment["straightenedImagePath"] = row[3]
+            return garment
+        garment = json.loads(row["garment_json"])
+        garment["id"] = row["item_id"]
+        if row["image_url"]:
+            garment["imagePath"] = row["image_url"]
+        if row["straightened_image_url"]:
+            garment["straightenedImagePath"] = row["straightened_image_url"]
+        return garment
+
+    def upsert_wardrobe_item(
+        self,
+        user_id: str,
+        item_id: str,
+        garment_json: Dict[str, Any],
+        image_url: Optional[str] = None,
+        straightened_image_url: Optional[str] = None,
+    ) -> bool:
+        payload = json.dumps(garment_json)
+        conn = self.get_connection()
+        try:
+            if self.db_type == "postgres":
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO wardrobe_items (
+                            item_id, user_id, garment_json, image_url, straightened_image_url
+                        ) VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (item_id) DO UPDATE SET
+                            garment_json = EXCLUDED.garment_json,
+                            image_url = EXCLUDED.image_url,
+                            straightened_image_url = EXCLUDED.straightened_image_url,
+                            updated_at = CURRENT_TIMESTAMP;
+                        """,
+                        (item_id, user_id, payload, image_url, straightened_image_url),
+                    )
+                conn.commit()
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO wardrobe_items (
+                        item_id, user_id, garment_json, image_url, straightened_image_url
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(item_id) DO UPDATE SET
+                        garment_json = excluded.garment_json,
+                        image_url = excluded.image_url,
+                        straightened_image_url = excluded.straightened_image_url,
+                        updated_at = CURRENT_TIMESTAMP;
+                    """,
+                    (item_id, user_id, payload, image_url, straightened_image_url),
+                )
+                conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error upserting wardrobe item: {e}")
+            if self.db_type == "postgres":
+                conn.rollback()
+            return False
+        finally:
+            conn.close()
+
+    def delete_wardrobe_item(self, user_id: str, item_id: str) -> bool:
+        conn = self.get_connection()
+        try:
+            if self.db_type == "postgres":
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM wardrobe_items WHERE item_id = %s AND user_id = %s;",
+                        (item_id, user_id),
+                    )
+                    deleted = cur.rowcount > 0
+                conn.commit()
+            else:
+                cur = conn.cursor()
+                cur.execute(
+                    "DELETE FROM wardrobe_items WHERE item_id = ? AND user_id = ?;",
+                    (item_id, user_id),
+                )
+                deleted = cur.rowcount > 0
+                conn.commit()
+            return deleted
+        except Exception as e:
+            print(f"Error deleting wardrobe item: {e}")
+            if self.db_type == "postgres":
+                conn.rollback()
+            return False
+        finally:
+            conn.close()
 
     def _row_to_user(self, row, is_postgres: bool) -> Dict[str, Any]:
         if is_postgres:

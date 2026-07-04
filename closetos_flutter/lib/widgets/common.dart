@@ -84,6 +84,28 @@ class GarmentImage extends StatelessWidget {
       );
     }
 
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return Image.network(
+        path,
+        fit: fit,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => _placeholder(),
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) return child;
+          return Container(
+            color: AppColors.greige,
+            child: const Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          );
+        },
+      );
+    }
+
     if (kIsWeb) {
       return _placeholder();
     }

@@ -119,7 +119,7 @@ def _quota_user_message() -> str:
         "free_tier (limit 0) — a known Paid Tier 1 bug. "
         "Fix options: (1) wait and retry later, (2) recreate your API key in AI Studio, "
         "(3) set TRY_ON_PROVIDER=vertex with a service account on project "
-        f"{GOOGLE_CLOUD_PROJECT}. See GET /try-on/check for details."
+        f"{GOOGLE_CLOUD_PROJECT}. See GET /health/check for details."
     )
 
 

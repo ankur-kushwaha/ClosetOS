@@ -8,11 +8,13 @@ class AuthService extends ChangeNotifier {
   AuthService({
     required StorageService storage,
     required ApiService api,
+    this.onAuthenticated,
   })  : _storage = storage,
         _api = api;
 
   final StorageService _storage;
   final ApiService _api;
+  final Future<void> Function()? onAuthenticated;
 
   AppUser? currentUser;
   bool isLoading = false;
@@ -34,6 +36,7 @@ class AuthService extends ChangeNotifier {
       if (user.onboardingCompleted) {
         await _storage.setOnboardingComplete();
       }
+      await onAuthenticated?.call();
     } else {
       await _storage.clearAuth();
       _api.setAuthToken(null);
@@ -120,5 +123,6 @@ class AuthService extends ChangeNotifier {
     }
     _api.setAuthToken(token);
     currentUser = user;
+    await onAuthenticated?.call();
   }
 }

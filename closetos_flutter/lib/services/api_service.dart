@@ -16,6 +16,8 @@ class ApiService {
 
   void setAuthToken(String? token) => _authToken = token;
 
+  bool get hasAuth => _authToken != null;
+
   Map<String, String> _headers({bool json = false}) {
     final headers = <String, String>{};
     if (json) headers['Content-Type'] = 'application/json';
@@ -343,6 +345,15 @@ class ApiService {
         String? imageBase64;
         if (path.startsWith('b64://')) {
           imageBase64 = extractB64Payload(path);
+        } else if (path.startsWith('http://') || path.startsWith('https://')) {
+          try {
+            final imgRes = await _client.get(Uri.parse(path)).timeout(
+              const Duration(seconds: 15),
+            );
+            if (imgRes.statusCode == 200) {
+              imageBase64 = base64Encode(imgRes.bodyBytes);
+            }
+          } catch (_) {}
         }
         if (imageBase64 == null || imageBase64.isEmpty) continue;
         garmentPayload.add({
@@ -438,6 +449,84 @@ class ApiService {
     } catch (e) {
       lastError = e.toString();
       return null;
+    }
+  }
+
+  Future<List<Garment>?> fetchWardrobe() async {
+    lastError = null;
+    if (!hasAuth) return null;
+    try {
+      final res = await _client
+          .get(_uri('/wardrobe'), headers: _headers())
+          .timeout(const Duration(seconds: 30));
+
+      if (res.statusCode != 200) {
+        lastError = _parseError(res);
+        return null;
+      }
+
+      final root = jsonDecode(res.body) as Map<String, dynamic>;
+      final list = root['garments'] as List<dynamic>;
+      return list
+          .map((e) => Garment.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      lastError = e.toString();
+      return null;
+    }
+  }
+
+  Future<Garment?> syncGarment(
+    Garment garment, {
+    String? imageBase64,
+    String? straightenedBase64,
+  }) async {
+    lastError = null;
+    if (!hasAuth) return null;
+    try {
+      final payload = <String, dynamic>{'garment': garment.toJson()};
+      if (imageBase64 != null) payload['image_base64'] = imageBase64;
+      if (straightenedBase64 != null) {
+        payload['straightened_image_base64'] = straightenedBase64;
+      }
+
+      final res = await _client
+          .post(
+            _uri('/wardrobe/sync'),
+            headers: _headers(json: true),
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 60));
+
+      if (res.statusCode != 200) {
+        lastError = _parseError(res);
+        return null;
+      }
+
+      final root = jsonDecode(res.body) as Map<String, dynamic>;
+      return Garment.fromJson(root['garment'] as Map<String, dynamic>);
+    } catch (e) {
+      lastError = e.toString();
+      return null;
+    }
+  }
+
+  Future<bool> deleteWardrobeItem(String itemId) async {
+    lastError = null;
+    if (!hasAuth) return false;
+    try {
+      final res = await _client
+          .delete(_uri('/wardrobe/$itemId'), headers: _headers())
+          .timeout(const Duration(seconds: 15));
+
+      if (res.statusCode != 200) {
+        lastError = _parseError(res);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      lastError = e.toString();
+      return false;
     }
   }
 

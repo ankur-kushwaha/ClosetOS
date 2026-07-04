@@ -12,7 +12,9 @@ import '../widgets/stripe_background.dart';
 enum _IngestPhase { import, review }
 
 class IngestScreen extends StatefulWidget {
-  const IngestScreen({super.key});
+  const IngestScreen({super.key, this.onReviewComplete});
+
+  final VoidCallback? onReviewComplete;
 
   @override
   State<IngestScreen> createState() => _IngestScreenState();
@@ -25,6 +27,7 @@ class _IngestScreenState extends State<IngestScreen> {
   bool _detecting = false;
   bool _processing = false;
   List<DetectedBox> _boxes = [];
+  List<IngestionItem?> _prepItems = [];
   List<IngestionItem> _reviewQueue = [];
   int _reviewIndex = 0;
   int _accepted = 0;
@@ -48,6 +51,7 @@ class _IngestScreenState extends State<IngestScreen> {
     setState(() {
       _detecting = true;
       _boxes = [];
+      _prepItems = [];
       _phase = _IngestPhase.import;
       _reviewQueue = [];
       _reviewIndex = 0;
@@ -87,6 +91,7 @@ class _IngestScreenState extends State<IngestScreen> {
       _detecting = false;
       _boxes = allBoxes;
       _processing = true;
+      _prepItems = List<IngestionItem?>.filled(allBoxes.length, null);
     });
 
     await _prepareForReview(allBoxes);
@@ -94,7 +99,22 @@ class _IngestScreenState extends State<IngestScreen> {
 
   Future<void> _prepareForReview(List<DetectedBox> boxes) async {
     final repo = context.read<WardrobeRepository>();
-    final prepared = await repo.prepareIngestionBatch(boxes);
+
+    final prepared = await Future.wait(
+      List.generate(boxes.length, (i) {
+        final box = boxes[i];
+        return repo.prepareIngestionReview(
+          box,
+          onUpdate: (item) {
+            if (!mounted) return;
+            setState(() => _prepItems[i] = item);
+          },
+        ).then((item) {
+          if (mounted) setState(() => _prepItems[i] = item);
+          return item;
+        });
+      }),
+    );
 
     if (!mounted) return;
 
@@ -103,6 +123,7 @@ class _IngestScreenState extends State<IngestScreen> {
 
     setState(() {
       _processing = false;
+      _prepItems = [];
       _reviewQueue = reviewItems;
       _reviewIndex = 0;
       _phase =
@@ -121,26 +142,35 @@ class _IngestScreenState extends State<IngestScreen> {
     }
   }
 
-  Future<void> _acceptCurrent() async {
+  void _acceptCurrent(ExtractedAttributes? editedAttrs) {
     final item = _currentReview;
-    if (item == null || _processing) return;
+    if (item == null) return;
 
-    setState(() => _processing = true);
-    final repo = context.read<WardrobeRepository>();
+    if (editedAttrs != null) {
+      item.attributes = editedAttrs;
+    }
+
     final hasNormalized = (item.normalizedBase64 ?? '').isNotEmpty &&
         item.normalizedBase64 != item.cropBase64;
 
-    final result = await repo.finalizeIngestion(
-      item,
-      useNormalized: hasNormalized,
-    );
-
-    if (!mounted) return;
-
     setState(() {
-      _processing = false;
-      if (result.status == 'done') _accepted++;
+      _accepted++;
       _reviewIndex++;
+    });
+
+    final repo = context.read<WardrobeRepository>();
+    repo.finalizeIngestion(item, useNormalized: hasNormalized).then((result) {
+      if (!mounted) return;
+      if (result.status == 'failed') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result.error ?? 'Could not save garment.',
+              style: AppTypography.ui(color: AppColors.surface),
+            ),
+          ),
+        );
+      }
     });
 
     _checkReviewComplete();
@@ -179,14 +209,21 @@ class _IngestScreenState extends State<IngestScreen> {
       );
     }
 
+    final shouldGoToWardrobe = _accepted > 0;
+
     setState(() {
       _phase = _IngestPhase.import;
       _boxes = [];
+      _prepItems = [];
       _reviewQueue = [];
       _reviewIndex = 0;
       _accepted = 0;
       _rejected = 0;
     });
+
+    if (shouldGoToWardrobe) {
+      widget.onReviewComplete?.call();
+    }
   }
 
   @override
@@ -199,7 +236,6 @@ class _IngestScreenState extends State<IngestScreen> {
               total: _reviewQueue.length,
               item: _currentReview!,
               nextItem: _nextReview,
-              processing: _processing,
               onReject: _rejectCurrent,
               onAccept: _acceptCurrent,
             )
@@ -208,6 +244,7 @@ class _IngestScreenState extends State<IngestScreen> {
               processing: _processing,
               foundCount: _foundCount,
               boxes: _boxes,
+              prepItems: _prepItems,
               onBulkPhotos: _pickBulkPhotos,
             ),
     );
@@ -222,6 +259,7 @@ class _ImportView extends StatelessWidget {
     required this.processing,
     required this.foundCount,
     required this.boxes,
+    required this.prepItems,
     required this.onBulkPhotos,
   });
 
@@ -229,12 +267,14 @@ class _ImportView extends StatelessWidget {
   final bool processing;
   final int foundCount;
   final List<DetectedBox> boxes;
+  final List<IngestionItem?> prepItems;
   final VoidCallback onBulkPhotos;
 
   @override
   Widget build(BuildContext context) {
     final showGrid = detecting || processing || boxes.isNotEmpty;
     final placeholderCount = detecting ? 6 : 0;
+    final readyCount = prepItems.where((i) => i?.status == 'review').length;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
@@ -259,10 +299,12 @@ class _ImportView extends StatelessWidget {
             detecting: detecting,
             processing: processing,
             count: foundCount,
+            readyCount: readyCount,
           ),
           const SizedBox(height: 16),
           _ItemGrid(
             boxes: boxes,
+            prepItems: prepItems,
             placeholderCount: placeholderCount,
           ),
         ],
@@ -329,11 +371,13 @@ class _StatusLine extends StatelessWidget {
     required this.detecting,
     required this.processing,
     required this.count,
+    required this.readyCount,
   });
 
   final bool detecting;
   final bool processing;
   final int count;
+  final int readyCount;
 
   @override
   Widget build(BuildContext context) {
@@ -343,7 +387,9 @@ class _StatusLine extends StatelessWidget {
           ? '$count items found, and counting…'
           : 'Scanning your photos…';
     } else if (processing) {
-      text = '$count items found — normalizing…';
+      text = readyCount > 0
+          ? '$readyCount of $count ready — fetching metadata…'
+          : '$count items found — fetching metadata…';
     } else {
       text = '$count items found';
     }
@@ -376,10 +422,12 @@ class _StatusLine extends StatelessWidget {
 class _ItemGrid extends StatelessWidget {
   const _ItemGrid({
     required this.boxes,
+    required this.prepItems,
     required this.placeholderCount,
   });
 
   final List<DetectedBox> boxes;
+  final List<IngestionItem?> prepItems;
   final int placeholderCount;
 
   @override
@@ -398,7 +446,13 @@ class _ItemGrid extends StatelessWidget {
       itemCount: total,
       itemBuilder: (_, i) {
         if (i < boxes.length) {
-          return _GridThumbnail(box: boxes[i]);
+          final prep = i < prepItems.length ? prepItems[i] : null;
+          final processing = prep == null || prep.status == 'processing';
+          return _GridThumbnail(
+            box: boxes[i],
+            processing: processing,
+            stepLabel: prep?.stepLabel,
+          );
         }
         return const _GridPlaceholder();
       },
@@ -407,9 +461,15 @@ class _ItemGrid extends StatelessWidget {
 }
 
 class _GridThumbnail extends StatelessWidget {
-  const _GridThumbnail({required this.box});
+  const _GridThumbnail({
+    required this.box,
+    this.processing = false,
+    this.stepLabel,
+  });
 
   final DetectedBox box;
+  final bool processing;
+  final String? stepLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -420,16 +480,56 @@ class _GridThumbnail extends StatelessWidget {
         border: Border.all(color: AppColors.border),
       ),
       clipBehavior: Clip.antiAlias,
-      child: box.cropBase64.isNotEmpty
-          ? Image.memory(
-              base64Decode(box.cropBase64),
-              fit: BoxFit.cover,
-              gaplessPlayback: true,
-            )
-          : const StripeBackground(
-              baseColor: AppColors.surface,
-              opacity: 0.35,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          box.cropBase64.isNotEmpty
+              ? Image.memory(
+                  base64Decode(box.cropBase64),
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                )
+              : const StripeBackground(
+                  baseColor: AppColors.surface,
+                  opacity: 0.35,
+                ),
+          if (processing)
+            ColoredBox(
+              color: AppColors.ink900.withValues(alpha: 0.5),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.surface,
+                      ),
+                    ),
+                    if (stepLabel != null && stepLabel!.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        child: Text(
+                          stepLabel!,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTypography.ui(
+                            fontSize: 9,
+                            color: AppColors.surface,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
+        ],
+      ),
     );
   }
 }
@@ -456,13 +556,12 @@ class _GridPlaceholder extends StatelessWidget {
 
 // ─── Review sweep phase ──────────────────────────────────────────────────────
 
-class _ReviewSweepView extends StatelessWidget {
+class _ReviewSweepView extends StatefulWidget {
   const _ReviewSweepView({
     required this.current,
     required this.total,
     required this.item,
     required this.nextItem,
-    required this.processing,
     required this.onReject,
     required this.onAccept,
   });
@@ -471,96 +570,104 @@ class _ReviewSweepView extends StatelessWidget {
   final int total;
   final IngestionItem item;
   final IngestionItem? nextItem;
-  final bool processing;
   final VoidCallback onReject;
-  final VoidCallback onAccept;
+  final void Function(ExtractedAttributes? attrs) onAccept;
+
+  @override
+  State<_ReviewSweepView> createState() => _ReviewSweepViewState();
+}
+
+class _ReviewSweepViewState extends State<_ReviewSweepView> {
+  final _cardKey = GlobalKey<_ReviewCardState>();
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  'Review your sweep',
+                  style: AppTypography.display(
+                    fontSize: 30,
+                    color: AppColors.ink900,
+                    fontWeight: FontWeight.w500,
+                    height: 1.1,
+                  ),
+                ),
+              ),
+              Text(
+                '${widget.current} / ${widget.total}',
+                style: AppTypography.ui(
+                  fontSize: 13,
+                  color: AppColors.ink600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Expanded(
+            child: Stack(
+              alignment: Alignment.center,
               children: [
-                Expanded(
-                  child: Text(
-                    'Review your sweep',
-                    style: AppTypography.display(
-                      fontSize: 30,
-                      color: AppColors.ink900,
-                      fontWeight: FontWeight.w500,
-                      height: 1.1,
-                    ),
-                  ),
-                ),
-                Text(
-                  '$current / $total',
-                  style: AppTypography.ui(
-                    fontSize: 13,
-                    color: AppColors.ink600,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            Expanded(
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  if (nextItem != null)
-                    Positioned(
-                      top: 12,
-                      left: 16,
-                      right: 16,
-                      bottom: 0,
-                      child: Transform.scale(
-                        scale: 0.96,
-                        child: _ReviewCard(
-                          item: nextItem!,
-                          interactive: false,
-                        ),
+                if (widget.nextItem != null)
+                  Positioned(
+                    top: 12,
+                    left: 16,
+                    right: 16,
+                    bottom: 0,
+                    child: Transform.scale(
+                      scale: 0.96,
+                      child: _ReviewCard(
+                        key: ValueKey(widget.nextItem!.id),
+                        item: widget.nextItem!,
+                        interactive: false,
                       ),
                     ),
-                  Positioned.fill(
-                    child: _ReviewCard(
-                      item: item,
-                      interactive: !processing,
-                    ),
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _SweepActionButton(
-                  icon: Icons.close,
-                  filled: false,
-                  onPressed: processing ? null : onReject,
-                ),
-                const SizedBox(width: 28),
-                _SweepActionButton(
-                  icon: Icons.check,
-                  filled: true,
-                  onPressed: processing ? null : onAccept,
-                  loading: processing,
+                Positioned.fill(
+                  child: _ReviewCard(
+                    key: _cardKey,
+                    item: widget.item,
+                    interactive: true,
+                  ),
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _SweepActionButton(
+                icon: Icons.close,
+                filled: false,
+                onPressed: widget.onReject,
+              ),
+              const SizedBox(width: 28),
+              _SweepActionButton(
+                icon: Icons.check,
+                filled: true,
+                onPressed: () {
+                  widget.onAccept(_cardKey.currentState?.editedAttributes);
+                },
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 }
 
-class _ReviewCard extends StatelessWidget {
+class _ReviewCard extends StatefulWidget {
   const _ReviewCard({
+    super.key,
     required this.item,
     this.interactive = true,
   });
@@ -569,22 +676,87 @@ class _ReviewCard extends StatelessWidget {
   final bool interactive;
 
   @override
+  State<_ReviewCard> createState() => _ReviewCardState();
+}
+
+class _ReviewCardState extends State<_ReviewCard> {
+  late TextEditingController _subcategoryCtrl;
+  late TextEditingController _categoryCtrl;
+  late TextEditingController _colorCtrl;
+  late TextEditingController _materialCtrl;
+  late TextEditingController _patternCtrl;
+  late TextEditingController _fitCtrl;
+
+  ExtractedAttributes? get editedAttributes {
+    final base = widget.item.attributes;
+    if (base == null) return null;
+    return base.copyWith(
+      subcategory: _subcategoryCtrl.text.trim(),
+      category: _categoryCtrl.text.trim(),
+      colorName: _colorCtrl.text.trim(),
+      material: _materialCtrl.text.trim(),
+      pattern: _patternCtrl.text.trim(),
+      fit: _fitCtrl.text.trim(),
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final attrs = widget.item.attributes;
+    _subcategoryCtrl = TextEditingController(
+      text: attrs?.subcategory.isNotEmpty == true
+          ? attrs!.subcategory
+          : (widget.item.label ?? ''),
+    );
+    _categoryCtrl = TextEditingController(text: attrs?.category ?? '');
+    _colorCtrl = TextEditingController(text: attrs?.colorName ?? '');
+    _materialCtrl = TextEditingController(text: attrs?.material ?? '');
+    _patternCtrl = TextEditingController(text: attrs?.pattern ?? '');
+    _fitCtrl = TextEditingController(text: attrs?.fit ?? '');
+  }
+
+  @override
+  void didUpdateWidget(covariant _ReviewCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.item.id != widget.item.id) {
+      final attrs = widget.item.attributes;
+      _subcategoryCtrl.text = attrs?.subcategory.isNotEmpty == true
+          ? attrs!.subcategory
+          : (widget.item.label ?? '');
+      _categoryCtrl.text = attrs?.category ?? '';
+      _colorCtrl.text = attrs?.colorName ?? '';
+      _materialCtrl.text = attrs?.material ?? '';
+      _patternCtrl.text = attrs?.pattern ?? '';
+      _fitCtrl.text = attrs?.fit ?? '';
+    }
+  }
+
+  @override
+  void dispose() {
+    _subcategoryCtrl.dispose();
+    _categoryCtrl.dispose();
+    _colorCtrl.dispose();
+    _materialCtrl.dispose();
+    _patternCtrl.dispose();
+    _fitCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final attrs = item.attributes;
-    final imageB64 = item.normalizedBase64?.isNotEmpty == true
-        ? item.normalizedBase64!
-        : (item.cropBase64 ?? '');
-    final name = _garmentName(item, attrs);
-    final chips = _buildChips(attrs);
+    final imageB64 = widget.item.normalizedBase64?.isNotEmpty == true
+        ? widget.item.normalizedBase64!
+        : (widget.item.cropBase64 ?? '');
 
     return Opacity(
-      opacity: interactive ? 1 : 0.55,
+      opacity: widget.interactive ? 1 : 0.55,
       child: Container(
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: AppColors.border),
-          boxShadow: interactive
+          boxShadow: widget.interactive
               ? [
                   BoxShadow(
                     color: AppColors.ink900.withValues(alpha: 0.06),
@@ -599,7 +771,7 @@ class _ReviewCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              flex: 11,
+              flex: 10,
               child: imageB64.isNotEmpty
                   ? Image.memory(
                       base64Decode(imageB64),
@@ -611,93 +783,145 @@ class _ReviewCard extends StatelessWidget {
                       opacity: 0.35,
                     ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
+            if (widget.interactive)
+              Flexible(
+                flex: 9,
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Expanded(
-                        child: Text(
-                          name,
-                          style: AppTypography.ui(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.ink900,
+                      _AttrField(
+                        label: 'Name',
+                        controller: _subcategoryCtrl,
+                        hint: 'e.g. Crew neck tee',
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _AttrField(
+                              label: 'Category',
+                              controller: _categoryCtrl,
+                              hint: 'Top',
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _AttrField(
+                              label: 'Color',
+                              controller: _colorCtrl,
+                              hint: 'Navy',
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _AttrField(
+                              label: 'Material',
+                              controller: _materialCtrl,
+                              hint: 'Cotton',
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _AttrField(
+                              label: 'Pattern',
+                              controller: _patternCtrl,
+                              hint: 'Solid',
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      _AttrField(
+                        label: 'Fit',
+                        controller: _fitCtrl,
+                        hint: 'Regular',
                       ),
                     ],
                   ),
-                  if (chips.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: chips,
-                    ),
-                  ],
-                ],
+                ),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                child: Text(
+                  widget.item.attributes?.subcategory.isNotEmpty == true
+                      ? widget.item.attributes!.subcategory
+                      : (widget.item.label ?? 'Garment'),
+                  style: AppTypography.ui(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.ink900,
+                  ),
+                ),
               ),
-            ),
           ],
         ),
       ),
     );
   }
-
-  String _garmentName(IngestionItem item, ExtractedAttributes? attrs) {
-    if (attrs != null && attrs.subcategory.isNotEmpty) {
-      return attrs.subcategory;
-    }
-    if (attrs != null && attrs.category.isNotEmpty) {
-      return attrs.category;
-    }
-    return item.label ?? 'Garment';
-  }
-
-  List<Widget> _buildChips(ExtractedAttributes? attrs) {
-    if (attrs == null) return [];
-
-    final tags = <(String label, bool highlight)>[
-      (attrs.category, true),
-      if (attrs.colorName.isNotEmpty) (attrs.colorName, false),
-      if (attrs.material.isNotEmpty) (attrs.material, false),
-      if (attrs.fit.isNotEmpty) ('${attrs.fit} fit', false),
-    ];
-
-    return tags.map((tag) => _MetaChip(label: tag.$1, selected: tag.$2)).toList();
-  }
 }
 
-class _MetaChip extends StatelessWidget {
-  const _MetaChip({required this.label, required this.selected});
+class _AttrField extends StatelessWidget {
+  const _AttrField({
+    required this.label,
+    required this.controller,
+    required this.hint,
+  });
 
   final String label;
-  final bool selected;
+  final TextEditingController controller;
+  final String hint;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: selected ? AppColors.clay100 : AppColors.greige,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: selected ? AppColors.clay500.withValues(alpha: 0.35) : Colors.transparent,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: AppTypography.ui(
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            color: AppColors.ink400,
+          ),
         ),
-      ),
-      child: Text(
-        label,
-        style: AppTypography.ui(
-          fontSize: 12,
-          fontWeight: FontWeight.w500,
-          color: selected ? AppColors.clay700 : AppColors.ink600,
+        const SizedBox(height: 4),
+        TextField(
+          controller: controller,
+          style: AppTypography.ui(fontSize: 13, color: AppColors.ink900),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: AppTypography.ui(fontSize: 13, color: AppColors.ink400),
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
+            ),
+            filled: true,
+            fillColor: AppColors.greige,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(
+                color: AppColors.clay500.withValues(alpha: 0.5),
+              ),
+            ),
+          ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -707,20 +931,17 @@ class _SweepActionButton extends StatelessWidget {
     required this.icon,
     required this.filled,
     required this.onPressed,
-    this.loading = false,
   });
 
   final IconData icon;
   final bool filled;
   final VoidCallback? onPressed;
-  final bool loading;
 
   @override
   Widget build(BuildContext context) {
     return Material(
       color: filled ? AppColors.clay500 : AppColors.surface,
       shape: const CircleBorder(),
-      elevation: filled ? 0 : 0,
       child: InkWell(
         onTap: onPressed,
         customBorder: const CircleBorder(),
@@ -731,19 +952,11 @@ class _SweepActionButton extends StatelessWidget {
             shape: BoxShape.circle,
             border: filled ? null : Border.all(color: AppColors.border),
           ),
-          child: loading
-              ? const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: AppColors.surface,
-                  ),
-                )
-              : Icon(
-                  icon,
-                  size: 24,
-                  color: filled ? AppColors.surface : AppColors.clay500,
-                ),
+          child: Icon(
+            icon,
+            size: 24,
+            color: filled ? AppColors.surface : AppColors.clay500,
+          ),
         ),
       ),
     );

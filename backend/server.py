@@ -12,7 +12,7 @@ import torch
 import numpy as np
 from PIL import Image, ImageOps
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Depends
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
@@ -26,6 +26,7 @@ from auth import (
     get_current_user_id,
     new_user_id,
 )
+from storage.r2 import upload_image, delete_garment_images, local_image_path, is_r2_configured, check_r2
 from pipeline.config import (
     DETECTION_MODEL,
     GARMENTS_DIR,
@@ -135,7 +136,8 @@ def read_root():
         "normalization_provider": NORMALIZATION_PROVIDER,
         "try_on_model": TRY_ON_MODEL,
         "database": db_manager.db_type,
-        "storage": GARMENTS_DIR
+        "storage": GARMENTS_DIR,
+        "health_check": "/health/check",
     }
 
 @app.get("/test", response_class=HTMLResponse)
@@ -542,8 +544,7 @@ def yolo_world_finalize(payload: FinalizePayload):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/try-on/check")
-def try_on_check():
+def _check_try_on() -> Dict[str, Any]:
     """Diagnose Gemini billing vs known image-model quota bug."""
     from pipeline.config import GEMINI_API_KEY, TRY_ON_MODEL
 
@@ -555,7 +556,7 @@ def try_on_check():
         }
 
     key_hint = f"{GEMINI_API_KEY[:4]}…{GEMINI_API_KEY[-4:]}" if len(GEMINI_API_KEY) > 8 else "(too short)"
-    result = {
+    result: Dict[str, Any] = {
         "ok": False,
         "model": TRY_ON_MODEL,
         "key_hint": key_hint,
@@ -616,6 +617,20 @@ def try_on_check():
     except Exception as e:
         result["error"] = str(e)
         return result
+
+
+@app.get("/health/check")
+def health_check():
+    """Diagnose try-on (Gemini) and wardrobe image storage (Cloudflare R2)."""
+    try_on = _check_try_on()
+    r2 = check_r2()
+    return {
+        "ok": try_on.get("ok", False) and r2.get("ok", False),
+        "try_on": try_on,
+        "r2": r2,
+        "database": db_manager.db_type,
+        "image_storage": "r2" if is_r2_configured() else "local",
+    }
 
 
 @app.post("/try-on/render")
@@ -748,6 +763,154 @@ def update_onboarding(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return _public_user(user)
+
+
+# --- Wardrobe sync (Cloudflare R2 or local disk for images) ---
+
+class WardrobeSyncPayload(BaseModel):
+    garment: Dict[str, Any]
+    image_base64: Optional[str] = None
+    straightened_image_base64: Optional[str] = None
+
+
+def _decode_image_b64(value: Optional[str]) -> Optional[bytes]:
+    if not value:
+        return None
+    if value.startswith("b64://"):
+        value = value.split("/", 2)[-1]
+    try:
+        return base64.b64decode(value)
+    except Exception:
+        return None
+
+
+def _resolve_image_bytes(path_or_b64: Optional[str], explicit_b64: Optional[str]) -> Optional[bytes]:
+    if explicit_b64:
+        return _decode_image_b64(explicit_b64)
+    if not path_or_b64:
+        return None
+    if path_or_b64.startswith("http://") or path_or_b64.startswith("https://"):
+        return None  # already uploaded
+    return _decode_image_b64(path_or_b64)
+
+
+def _sync_wardrobe_item(
+    user_id: str,
+    garment: Dict[str, Any],
+    image_base64: Optional[str] = None,
+    straightened_image_base64: Optional[str] = None,
+) -> Dict[str, Any]:
+    item_id = garment.get("id") or str(uuid.uuid4())
+    garment = {**garment, "id": item_id}
+
+    image_url = garment.get("imagePath") if str(garment.get("imagePath", "")).startswith("http") else None
+    straightened_url = (
+        garment.get("straightenedImagePath")
+        if str(garment.get("straightenedImagePath", "")).startswith("http")
+        else None
+    )
+
+    crop_bytes = _resolve_image_bytes(garment.get("imagePath"), image_base64)
+    if crop_bytes:
+        image_url = upload_image(crop_bytes, user_id, item_id, "crop.png")
+
+    straight_bytes = _resolve_image_bytes(
+        garment.get("straightenedImagePath"), straightened_image_base64
+    )
+    if straight_bytes:
+        straightened_url = upload_image(straight_bytes, user_id, item_id, "straightened.png")
+    elif crop_bytes and not straightened_url:
+        straightened_url = image_url
+
+    # Store metadata without inline base64
+    stored = {k: v for k, v in garment.items() if k not in ("imagePath", "straightenedImagePath")}
+    stored_json = {**stored, "id": item_id}
+
+    ok = db_manager.upsert_wardrobe_item(
+        user_id=user_id,
+        item_id=item_id,
+        garment_json=stored_json,
+        image_url=image_url,
+        straightened_image_url=straightened_url,
+    )
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to save wardrobe item")
+
+    result = {**stored_json}
+    if image_url:
+        result["imagePath"] = image_url
+    if straightened_url:
+        result["straightenedImagePath"] = straightened_url
+    return result
+
+
+@app.get("/wardrobe")
+def list_wardrobe(user_id: str = Depends(get_current_user_id)):
+    items = db_manager.get_wardrobe_items(user_id)
+    return {"garments": items, "storage": "r2" if is_r2_configured() else "local"}
+
+
+@app.post("/wardrobe/sync")
+def sync_wardrobe_item(
+    payload: WardrobeSyncPayload,
+    user_id: str = Depends(get_current_user_id),
+):
+    try:
+        garment = _sync_wardrobe_item(
+            user_id,
+            payload.garment,
+            payload.image_base64,
+            payload.straightened_image_base64,
+        )
+        return {"garment": garment}
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/wardrobe/sync-all")
+def sync_wardrobe_bulk(
+    garments: List[WardrobeSyncPayload],
+    user_id: str = Depends(get_current_user_id),
+):
+    synced = []
+    for entry in garments:
+        synced.append(
+            _sync_wardrobe_item(
+                user_id,
+                entry.garment,
+                entry.image_base64,
+                entry.straightened_image_base64,
+            )
+        )
+    return {"garments": synced, "count": len(synced)}
+
+
+@app.delete("/wardrobe/{item_id}")
+def delete_wardrobe_item(
+    item_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    deleted = db_manager.delete_wardrobe_item(user_id, item_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Item not found")
+    try:
+        delete_garment_images(user_id, item_id)
+    except Exception as e:
+        print(f"Warning: could not delete images for {item_id}: {e}")
+    return {"deleted": True, "item_id": item_id}
+
+
+@app.get("/wardrobe/images/{user_id}/{garment_id}/{filename}")
+def serve_wardrobe_image(user_id: str, garment_id: str, filename: str):
+    path = local_image_path(user_id, garment_id, filename)
+    if not path:
+        raise HTTPException(status_code=404, detail="Image not found")
+    media = "image/png" if filename.endswith(".png") else "image/jpeg"
+    return FileResponse(path, media_type=media)
 
 
 # 8. GET /garments - List all garments

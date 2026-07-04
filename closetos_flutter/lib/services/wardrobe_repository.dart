@@ -27,6 +27,7 @@ class WardrobeRepository extends ChangeNotifier {
   String? digitalTwinPath;
 
   bool isLoading = false;
+  bool isSyncing = false;
   String? lastError;
 
   static const categories = ['All', 'Top', 'Bottom', 'Outerwear', 'Shoes', 'Accessory'];
@@ -38,6 +39,71 @@ class WardrobeRepository extends ChangeNotifier {
     tryOnCache = _storage.loadTryOnCache();
     digitalTwinPath = _storage.digitalTwinPath;
     notifyListeners();
+  }
+
+  Future<void> syncWithCloud() async {
+    if (!_api.hasAuth || isSyncing) return;
+    isSyncing = true;
+    lastError = null;
+    notifyListeners();
+
+    try {
+      final localBefore = List<Garment>.from(garments);
+      final remote = await _api.fetchWardrobe();
+      if (remote == null) {
+        lastError = _api.lastError;
+        return;
+      }
+
+      final remoteIds = remote.map((g) => g.id).toSet();
+      garments = remote;
+      await _storage.saveGarments(garments);
+
+      // Push local-only items not yet on the server
+      for (final local in localBefore) {
+        if (remoteIds.contains(local.id)) continue;
+        await _pushGarmentToCloud(local);
+      }
+    } finally {
+      isSyncing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<Garment?> _pushGarmentToCloud(Garment garment) async {
+    if (!_api.hasAuth) return garment;
+
+    String? imageB64;
+    String? straightB64;
+
+    if (!garment.imagePath.startsWith('http')) {
+      imageB64 = await _storage.readFileAsBase64(garment.imagePath) ??
+          extractB64Payload(garment.imagePath);
+    }
+    if (garment.straightenedImagePath.isNotEmpty &&
+        !garment.straightenedImagePath.startsWith('http')) {
+      straightB64 = await _storage.readFileAsBase64(
+            garment.straightenedImagePath,
+          ) ??
+          extractB64Payload(garment.straightenedImagePath);
+    }
+
+    final synced = await _api.syncGarment(
+      garment,
+      imageBase64: imageB64,
+      straightenedBase64: straightB64,
+    );
+    if (synced == null) {
+      lastError = _api.lastError;
+      return null;
+    }
+
+    final idx = garments.indexWhere((g) => g.id == garment.id);
+    if (idx >= 0) {
+      garments[idx] = synced;
+    }
+    await _storage.saveGarments(garments);
+    return synced;
   }
 
   int get totalItems => garments.length;
@@ -86,11 +152,15 @@ class WardrobeRepository extends ChangeNotifier {
     ];
     await _storage.saveGarments(garments);
     notifyListeners();
+    await _pushGarmentToCloud(garments.last);
   }
 
   Future<void> deleteGarment(String id) async {
     garments = garments.where((g) => g.id != id).toList();
     await _storage.saveGarments(garments);
+    if (_api.hasAuth) {
+      await _api.deleteWardrobeItem(id);
+    }
     notifyListeners();
   }
 
@@ -106,6 +176,7 @@ class WardrobeRepository extends ChangeNotifier {
     garments[idx] = g.copyWith(laundryStatus: next);
     await _storage.saveGarments(garments);
     notifyListeners();
+    await _pushGarmentToCloud(garments[idx]);
   }
 
   List<Garment> filterGarments({String category = 'All', String query = ''}) {
@@ -217,7 +288,7 @@ class WardrobeRepository extends ChangeNotifier {
     final item = IngestionItem(
       id: _uuid.v4(),
       status: 'processing',
-      stepLabel: 'Normalizing',
+      stepLabel: 'Fetching metadata',
       progress: 0.2,
       label: box.label,
       cropBase64: box.cropBase64,
@@ -339,6 +410,7 @@ class WardrobeRepository extends ChangeNotifier {
       }
 
       await addGarment(garment);
+      // addGarment already pushes to cloud
       item.status = 'done';
       item.stepLabel = 'Complete';
       item.progress = 1;
