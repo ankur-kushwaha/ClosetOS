@@ -10,9 +10,14 @@ __pycache__/
 *$py.class
 .ipynb_checkpoints/
 
-# Runtime data and downloaded weights (baked in at build via download_models.py)
-storage/
-.models/
+# Runtime data under storage/ (keep storage/*.py package code)
+storage/garments/
+storage/temp_sources/
+storage/models/
+storage/**/*.jpg
+storage/**/*.jpeg
+storage/**/*.png
+storage/.DS_Store
 weights/
 *.pt
 *.pth
