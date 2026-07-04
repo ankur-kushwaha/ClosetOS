@@ -26,6 +26,20 @@ from pipeline.config import (
     MIN_DETECTION_CONFIDENCE,
     TRY_ON_MODEL,
 )
+
+
+def _sanitize_for_json(value: Any) -> Any:
+    """Recursively convert numpy types to native Python for json.dumps / FastAPI."""
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (np.floating, np.integer)):
+        return value.item()
+    if isinstance(value, dict):
+        return {k: _sanitize_for_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_for_json(v) for v in value]
+    return value
+
 from pipeline.model_loaders import ModelLoaders
 from pipeline.normalization import normalize_garment
 from pipeline.florence_attrs import extract_attributes
@@ -337,7 +351,7 @@ def _build_garment_attributes(
     }
     formality_score = formality_map.get(subcategory, 0.5)
 
-    return {
+    return _sanitize_for_json({
         "category": category,
         "subcategory": subcategory,
         "colorName": attrs["colorName"],
@@ -353,7 +367,7 @@ def _build_garment_attributes(
         "embedding": embedding.tolist() if hasattr(embedding, "tolist") else list(embedding),
         "florenceCaption": attrs.get("florence_caption", ""),
         "normalizationProvider": normalization_provider,
-    }
+    })
 
 
 @app.post("/yolo-world/extract-metadata")
@@ -496,6 +510,8 @@ def yolo_world_finalize(payload: FinalizePayload):
         subcategory = attrs["subcategory"]
         detected_colors = attrs.get("colors", ["gray"])
         pattern = attrs["pattern"]
+
+        embedding_list = _sanitize_for_json(embedding)
         
         # Map try_on categories/subcategories
         try_on_cat = map_to_try_on_category(category)
@@ -508,7 +524,7 @@ def yolo_world_finalize(payload: FinalizePayload):
             "subcategory": try_on_subcat,
             "color": detected_colors,
             "pattern": pattern,
-            "clip_embedding": embedding,
+            "clip_embedding": embedding_list,
             "bbox": [0, 0, image.width, image.height],
             "source_image_id": payload.source_image_id,
             "extraction_confidence": 1.0,
@@ -517,9 +533,12 @@ def yolo_world_finalize(payload: FinalizePayload):
         }
         
         # Persist to database
+        metadata_dict = _sanitize_for_json(metadata_dict)
         db_manager.save_garment(metadata_dict)
         with open(os.path.join(g_dir, "metadata.json"), "w") as f:
             json.dump(metadata_dict, f, indent=2)
+
+        response_attrs = _sanitize_for_json(response_attrs)
             
         return {
             "garment_id": g_id,

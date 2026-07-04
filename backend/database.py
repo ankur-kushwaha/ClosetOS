@@ -95,6 +95,13 @@ class DatabaseManager:
         color_json = json.dumps(data.get("color", []))
         pattern = data.get("pattern", "solid")
         clip_embedding = data.get("clip_embedding", [])
+        if isinstance(clip_embedding, np.ndarray):
+            clip_embedding = clip_embedding.tolist()
+        elif isinstance(clip_embedding, list):
+            clip_embedding = [
+                float(x.item()) if isinstance(x, (np.floating, np.integer)) else float(x)
+                for x in clip_embedding
+            ]
         bbox_json = json.dumps(data.get("bbox", []))
         source_image_id = data.get("source_image_id")
         extraction_confidence = data.get("extraction_confidence", 1.0)

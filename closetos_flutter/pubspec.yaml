@@ -1,0 +1,30 @@
+name: closetos_flutter
+description: ClosetOS — minimalist smart wardrobe for web and Android.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  provider: ^6.1.2
+  http: ^1.2.2
+  http_parser: ^4.1.2
+  hive_flutter: ^1.1.0
+  shared_preferences: ^2.3.3
+  path_provider: ^2.1.5
+  image_picker: ^1.1.2
+  uuid: ^4.5.1
+  intl: ^0.20.2
+  geolocator: ^13.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
