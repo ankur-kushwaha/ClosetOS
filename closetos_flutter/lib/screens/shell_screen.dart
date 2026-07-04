@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../services/auth_service.dart';
 import '../services/storage_service.dart';
 import '../services/wardrobe_repository.dart';
 import '../theme/app_theme.dart';
 import 'ingest_screen.dart';
+import 'login_screen.dart';
 import 'lookbook_screen.dart';
 import 'onboarding_screen.dart';
 import 'ootd_screen.dart';
@@ -38,45 +40,71 @@ class _ShellScreenState extends State<ShellScreen> {
     (icon: Icons.flight_outlined, label: 'Travel'),
   ];
 
+  bool get _isFullBleed => _index == 0 || _index == 1 || _index == 2;
+
+  void _onOnboardingComplete() {
+    setState(() => _onboarded = true);
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (!_onboarded) {
-      return OnboardingScreen(
-        onComplete: () => setState(() => _onboarded = true),
+    final auth = context.watch<AuthService>();
+
+    if (auth.isLoading && !auth.isAuthenticated) {
+      return const Scaffold(
+        backgroundColor: AppColors.canvas,
+        body: Center(child: CircularProgressIndicator(color: AppColors.clay500)),
       );
+    }
+
+    if (!auth.isAuthenticated) {
+      return const LoginScreen();
+    }
+
+    final userOnboarded =
+        _onboarded || (auth.currentUser?.onboardingCompleted ?? false);
+
+    if (!userOnboarded) {
+      return OnboardingScreen(onComplete: _onOnboardingComplete);
     }
 
     final repo = context.watch<WardrobeRepository>();
     final counts = repo.categoryCounts;
+    final userName = auth.currentUser?.name ?? 'there';
 
     return Scaffold(
+      backgroundColor: AppColors.canvas,
       drawer: Drawer(
-        backgroundColor: AppColors.black,
+        backgroundColor: AppColors.surface,
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'CLOSETOS',
-                  style: TextStyle(
+                Text(
+                  'ClosetOS',
+                  style: AppTypography.ui(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    letterSpacing: 4,
+                    letterSpacing: 3,
                   ),
                 ),
                 const SizedBox(height: 4),
-                const Text(
-                  'Smart Wardrobe',
-                  style: TextStyle(color: AppColors.gray400, fontSize: 12),
+                Text(
+                  'Hi, $userName',
+                  style: AppTypography.ui(fontSize: 12, color: AppColors.ink400),
                 ),
                 const SizedBox(height: 28),
-                const Divider(),
+                const Divider(color: AppColors.border),
                 const SizedBox(height: 16),
                 Text(
                   '${repo.totalItems} items',
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w300),
+                  style: AppTypography.display(
+                    fontSize: 28,
+                    color: AppColors.ink900,
+                    fontWeight: FontWeight.w400,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 ...counts.entries.map(
@@ -84,19 +112,26 @@ class _ShellScreenState extends State<ShellScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 2),
                     child: Text(
                       '${e.key}: ${e.value}',
-                      style: const TextStyle(
-                        color: AppColors.gray400,
+                      style: AppTypography.ui(
                         fontSize: 12,
+                        color: AppColors.ink400,
                       ),
                     ),
                   ),
                 ),
                 const Spacer(),
-                Text(
-                  'Backend: connected',
-                  style: TextStyle(
-                    color: AppColors.gray600,
-                    fontSize: 11,
+                TextButton.icon(
+                  onPressed: () async {
+                    Navigator.of(context).pop();
+                    await auth.logout();
+                  },
+                  icon: const Icon(Icons.logout, size: 18, color: AppColors.ink600),
+                  label: Text(
+                    'Sign out',
+                    style: AppTypography.ui(
+                      fontSize: 13,
+                      color: AppColors.ink600,
+                    ),
                   ),
                 ),
               ],
@@ -104,29 +139,30 @@ class _ShellScreenState extends State<ShellScreen> {
           ),
         ),
       ),
-      appBar: AppBar(
-        title: const Text('CLOSETOS'),
-        leading: Builder(
-          builder: (ctx) => IconButton(
-            icon: const Icon(Icons.menu, size: 20),
-            onPressed: () => Scaffold.of(ctx).openDrawer(),
-          ),
-        ),
-      ),
+      appBar: _isFullBleed
+          ? null
+          : AppBar(
+              title: const Text('ClosetOS'),
+              leading: Builder(
+                builder: (ctx) => IconButton(
+                  icon: const Icon(Icons.menu, size: 20),
+                  onPressed: () => Scaffold.of(ctx).openDrawer(),
+                ),
+              ),
+            ),
       body: IndexedStack(
         index: _index,
-        children: const [
-          OotdScreen(),
-          IngestScreen(),
-          WardrobeScreen(),
-          LookbookScreen(),
-          TravelScreen(),
+        children: [
+          const OotdScreen(),
+          const IngestScreen(),
+          WardrobeScreen(onAddGarment: () => setState(() => _index = 1)),
+          const LookbookScreen(),
+          const TravelScreen(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        height: 64,
         destinations: _tabs
             .map(
               (t) => NavigationDestination(

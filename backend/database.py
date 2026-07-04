@@ -55,6 +55,17 @@ class DatabaseManager:
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         );
                     """)
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS users (
+                            user_id UUID PRIMARY KEY,
+                            email VARCHAR(255) UNIQUE NOT NULL,
+                            password_hash TEXT NOT NULL,
+                            name VARCHAR(255) NOT NULL,
+                            taste TEXT,
+                            onboarding_completed BOOLEAN DEFAULT FALSE,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        );
+                    """)
                 conn.commit()
                 print("PostgreSQL database initialized successfully!")
             except Exception as e:
@@ -77,6 +88,17 @@ class DatabaseManager:
                         bbox TEXT NOT NULL, -- stored as JSON string
                         source_image_id TEXT,
                         extraction_confidence REAL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        user_id TEXT PRIMARY KEY,
+                        email TEXT UNIQUE NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        taste TEXT,
+                        onboarding_completed INTEGER DEFAULT 0,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
@@ -397,3 +419,192 @@ class DatabaseManager:
 
         scored_garments.sort(key=lambda x: x["similarity_score"], reverse=True)
         return scored_garments[:limit]
+
+    def _row_to_user(self, row, is_postgres: bool) -> Dict[str, Any]:
+        if is_postgres:
+            taste_raw = row[4]
+            return {
+                "user_id": str(row[0]),
+                "email": row[1],
+                "name": row[3],
+                "taste": json.loads(taste_raw) if taste_raw else None,
+                "onboarding_completed": bool(row[5]),
+                "created_at": row[6].isoformat() if row[6] else None,
+            }
+        taste_raw = row["taste"]
+        return {
+            "user_id": row["user_id"],
+            "email": row["email"],
+            "name": row["name"],
+            "taste": json.loads(taste_raw) if taste_raw else None,
+            "onboarding_completed": bool(row["onboarding_completed"]),
+            "created_at": row["created_at"],
+        }
+
+    def create_user(
+        self, user_id: str, email: str, password_hash: str, name: str
+    ) -> Optional[Dict[str, Any]]:
+        conn = self.get_connection()
+        try:
+            if self.db_type == "postgres":
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO users (user_id, email, password_hash, name)
+                        VALUES (%s, %s, %s, %s)
+                        RETURNING user_id, email, name, taste, onboarding_completed, created_at;
+                        """,
+                        (user_id, email.lower(), password_hash, name),
+                    )
+                    row = cur.fetchone()
+                conn.commit()
+                if not row:
+                    return None
+                return {
+                    "user_id": str(row[0]),
+                    "email": row[1],
+                    "name": row[2],
+                    "taste": json.loads(row[3]) if row[3] else None,
+                    "onboarding_completed": bool(row[4]),
+                    "created_at": row[5].isoformat() if row[5] else None,
+                }
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO users (user_id, email, password_hash, name)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (user_id, email.lower(), password_hash, name),
+                )
+                conn.commit()
+                return self.get_user_by_id(user_id)
+        except Exception as e:
+            print(f"Error creating user: {e}")
+            if self.db_type == "postgres":
+                conn.rollback()
+            return None
+        finally:
+            conn.close()
+
+    def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        conn = self.get_connection()
+        try:
+            if self.db_type == "postgres":
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT user_id, email, password_hash, name, taste,
+                               onboarding_completed, created_at
+                        FROM users WHERE email = %s;
+                        """,
+                        (email.lower(),),
+                    )
+                    row = cur.fetchone()
+                if not row:
+                    return None
+                user = self._row_to_user(row, True)
+                user["password_hash"] = row[2]
+                return user
+            else:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT user_id, email, password_hash, name, taste,
+                           onboarding_completed, created_at
+                    FROM users WHERE email = ?;
+                    """,
+                    (email.lower(),),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                user = self._row_to_user(row, False)
+                user["password_hash"] = row["password_hash"]
+                return user
+        except Exception as e:
+            print(f"Error fetching user by email: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        conn = self.get_connection()
+        try:
+            if self.db_type == "postgres":
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT user_id, email, password_hash, name, taste,
+                               onboarding_completed, created_at
+                        FROM users WHERE user_id = %s;
+                        """,
+                        (user_id,),
+                    )
+                    row = cur.fetchone()
+                if not row:
+                    return None
+                return self._row_to_user(row, True)
+            else:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT user_id, email, password_hash, name, taste,
+                           onboarding_completed, created_at
+                    FROM users WHERE user_id = ?;
+                    """,
+                    (user_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                return self._row_to_user(row, False)
+        except Exception as e:
+            print(f"Error fetching user by id: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def update_user_profile(
+        self,
+        user_id: str,
+        taste: Optional[Dict[str, Any]] = None,
+        onboarding_completed: Optional[bool] = None,
+    ) -> bool:
+        conn = self.get_connection()
+        try:
+            updates = []
+            params: list = []
+            if taste is not None:
+                updates.append("taste = %s" if self.db_type == "postgres" else "taste = ?")
+                params.append(json.dumps(taste))
+            if onboarding_completed is not None:
+                col = (
+                    "onboarding_completed = %s"
+                    if self.db_type == "postgres"
+                    else "onboarding_completed = ?"
+                )
+                updates.append(col)
+                params.append(onboarding_completed)
+
+            if not updates:
+                return True
+
+            params.append(user_id)
+            where = "user_id = %s" if self.db_type == "postgres" else "user_id = ?"
+            sql = f"UPDATE users SET {', '.join(updates)} WHERE {where}"
+
+            if self.db_type == "postgres":
+                with conn.cursor() as cur:
+                    cur.execute(sql, params)
+                conn.commit()
+            else:
+                conn.execute(sql, params)
+                conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error updating user profile: {e}")
+            if self.db_type == "postgres":
+                conn.rollback()
+            return False
+        finally:
+            conn.close()

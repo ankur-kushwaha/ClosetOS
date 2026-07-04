@@ -195,6 +195,40 @@ class Outfit {
       );
 }
 
+class AppUser {
+  AppUser({
+    required this.userId,
+    required this.email,
+    required this.name,
+    this.taste,
+    this.onboardingCompleted = false,
+  });
+
+  final String userId;
+  final String email;
+  final String name;
+  final UserTaste? taste;
+  final bool onboardingCompleted;
+
+  factory AppUser.fromJson(Map<String, dynamic> json) {
+    final tasteJson = json['taste'] as Map<String, dynamic>?;
+    return AppUser(
+      userId: json['user_id'] as String? ?? '',
+      email: json['email'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      taste: tasteJson != null ? UserTaste.fromJson(tasteJson) : null,
+      onboardingCompleted: json['onboarding_completed'] as bool? ?? false,
+    );
+  }
+}
+
+class AuthResult {
+  AuthResult({required this.token, required this.user});
+
+  final String token;
+  final AppUser user;
+}
+
 class UserTaste {
   UserTaste({
     this.preferredStyles = const [],

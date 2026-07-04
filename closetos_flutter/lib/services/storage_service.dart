@@ -38,6 +38,53 @@ class StorageService {
     await _settings?.put('has_completed_onboarding', true);
   }
 
+  String? get authToken => _settings?.get('auth_token') as String?;
+
+  Future<void> setAuthToken(String? token) async {
+    if (token == null) {
+      await _settings?.delete('auth_token');
+    } else {
+      await _settings?.put('auth_token', token);
+    }
+  }
+
+  String? get userId => _settings?.get('user_id') as String?;
+
+  Future<void> setUserId(String? id) async {
+    if (id == null) {
+      await _settings?.delete('user_id');
+    } else {
+      await _settings?.put('user_id', id);
+    }
+  }
+
+  String? get userName => _settings?.get('user_name') as String?;
+
+  Future<void> setUserName(String? name) async {
+    if (name == null) {
+      await _settings?.delete('user_name');
+    } else {
+      await _settings?.put('user_name', name);
+    }
+  }
+
+  String? get userEmail => _settings?.get('user_email') as String?;
+
+  Future<void> setUserEmail(String? email) async {
+    if (email == null) {
+      await _settings?.delete('user_email');
+    } else {
+      await _settings?.put('user_email', email);
+    }
+  }
+
+  Future<void> clearAuth() async {
+    await setAuthToken(null);
+    await setUserId(null);
+    await setUserName(null);
+    await setUserEmail(null);
+  }
+
   String? get digitalTwinPath => _settings?.get('digital_twin_path') as String?;
 
   Future<void> setDigitalTwinPath(String path) async {

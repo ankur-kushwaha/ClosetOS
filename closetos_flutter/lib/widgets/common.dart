@@ -68,8 +68,8 @@ class GarmentImage extends StatelessWidget {
   Widget build(BuildContext context) {
     if (path.isEmpty) {
       return Container(
-        color: AppColors.gray800,
-        child: const Icon(Icons.checkroom_outlined, color: AppColors.gray600),
+        color: AppColors.greige,
+        child: const Icon(Icons.checkroom_outlined, color: AppColors.ink400),
       );
     }
 
@@ -97,9 +97,9 @@ class GarmentImage extends StatelessWidget {
   }
 
   Widget _placeholder() => Container(
-        color: AppColors.gray800,
+        color: AppColors.greige,
         child: const Icon(Icons.image_not_supported_outlined,
-            color: AppColors.gray600),
+            color: AppColors.ink400),
       );
 }
 

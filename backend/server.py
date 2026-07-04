@@ -11,13 +11,21 @@ from concurrent.futures import ThreadPoolExecutor
 import torch
 import numpy as np
 from PIL import Image, ImageOps
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, EmailStr, Field
 
 # Database and pipeline imports
 from database import DatabaseManager
+from auth import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    get_current_user_id,
+    new_user_id,
+)
 from pipeline.config import (
     DETECTION_MODEL,
     GARMENTS_DIR,
@@ -397,34 +405,16 @@ def extract_garment_metadata(payload: ExtractMetadataPayload):
 
 @app.post("/yolo-world/gpt-normalize")
 def gpt_normalize_crop(payload: CropPayload):
+    """Passthrough — return the crop unchanged (normalization disabled for speed)."""
     try:
-        # Decode base64 crop image
         crop_bytes = base64.b64decode(payload.crop_base64)
         crop_img = Image.open(io.BytesIO(crop_bytes)).convert("RGBA")
-        crop_label = payload.label
-        
-        # 3. Build custom prompt incorporating the structured caption
-        custom_prompt = (
-            "Create a professional e-commerce flat-lay product photograph of the garment itself, with NO human model, head, face, hands, arms, legs, skin, or mannequin. "
-            f"The garment to isolate is: {payload.label}. "
-            "Remove any human bodies and isolate ONLY the clothing item. Lay the clothing completely flat and straightened. "
-            "Strictly preserve the exact neckline and collar shape (e.g., V-neck, round neck, polo collar, stand collar), "
-            "fabric texture, patterns, colors, stitching, buttons, and proportions. Do not change the neckline type "
-            "or modify the garment structure. Place the garment against a clean, solid studio white background "
-            "with bright, neutral studio lighting. Do NOT generate any humans, models, body parts, or backgrounds other than pure white."
-        )
 
-        print(f"Payload label: {payload.label}")
-     
-        # Run normalization pipeline with the customized prompt
-        normalized, provider = normalize_garment(crop_img, payload.label, custom_prompt=custom_prompt)
-        
-        # Save as base64 PNG
         buffered = io.BytesIO()
-        normalized.save(buffered, format="PNG")
+        crop_img.save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        
-        return {"image_base64": img_str, "provider": provider}
+
+        return {"image_base64": img_str, "provider": "none"}
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -673,6 +663,91 @@ def plan_travel_capsule(payload: TravelCapsuleRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Auth ---
+
+class SignupPayload(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6)
+    name: str = Field(min_length=1, max_length=255)
+
+
+class LoginPayload(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class OnboardingPayload(BaseModel):
+    taste: Dict[str, Any]
+    onboarding_completed: bool = True
+
+
+def _public_user(user: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "user_id": user["user_id"],
+        "email": user["email"],
+        "name": user["name"],
+        "taste": user.get("taste"),
+        "onboarding_completed": user.get("onboarding_completed", False),
+    }
+
+
+@app.post("/auth/signup")
+def signup(payload: SignupPayload):
+    existing = db_manager.get_user_by_email(payload.email)
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already registered")
+
+    user_id = new_user_id()
+    user = db_manager.create_user(
+        user_id=user_id,
+        email=payload.email,
+        password_hash=hash_password(payload.password),
+        name=payload.name.strip(),
+    )
+    if not user:
+        raise HTTPException(status_code=500, detail="Failed to create user")
+
+    token = create_access_token(user_id)
+    return {"token": token, "user": _public_user(user)}
+
+
+@app.post("/auth/login")
+def login(payload: LoginPayload):
+    user = db_manager.get_user_by_email(payload.email)
+    if not user or not verify_password(payload.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    token = create_access_token(user["user_id"])
+    return {"token": token, "user": _public_user(user)}
+
+
+@app.get("/auth/me")
+def get_me(user_id: str = Depends(get_current_user_id)):
+    user = db_manager.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return _public_user(user)
+
+
+@app.patch("/auth/onboarding")
+def update_onboarding(
+    payload: OnboardingPayload,
+    user_id: str = Depends(get_current_user_id),
+):
+    ok = db_manager.update_user_profile(
+        user_id,
+        taste=payload.taste,
+        onboarding_completed=payload.onboarding_completed,
+    )
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to save onboarding")
+
+    user = db_manager.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return _public_user(user)
 
 
 # 8. GET /garments - List all garments

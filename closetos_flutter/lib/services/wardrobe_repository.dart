@@ -121,6 +121,32 @@ class WardrobeRepository extends ChangeNotifier {
     }).toList();
   }
 
+  static const _lookNames = [
+    'Cozy layered',
+    'Polished edit',
+    'Weekend ease',
+    'Sharp lines',
+    'Easy layers',
+  ];
+
+  static const _reasonsCool = [
+    'Layered for a crisp morning — peel back by afternoon.',
+    'Warm enough now, with room to add a layer tonight.',
+    'Smart-casual for your day — cooler by evening.',
+  ];
+
+  static const _reasonsMild = [
+    'Smart-casual for your 2pm review — cooler by evening.',
+    'Balanced layers for a day that shifts temperature.',
+    'Easy polish without overthinking it.',
+  ];
+
+  static const _reasonsWarm = [
+    'Light and breathable — no layers needed today.',
+    'A clean, airy look for a warm afternoon.',
+    'Relaxed structure for heat and humidity.',
+  ];
+
   List<Outfit> generateRecommendations(double tempF, {String occasion = 'Daily'}) {
     final clean = garments
         .where((g) => g.laundryStatus == LaundryStatus.clean)
@@ -134,8 +160,10 @@ class WardrobeRepository extends ChangeNotifier {
 
     final results = <Outfit>[];
     final random = Random(tempF.toInt() + occasion.hashCode);
+    final reasons = _reasonsForTemp(tempF);
+    final count = min(5, tops.length * bottoms.length);
 
-    for (var i = 0; i < min(5, tops.length * bottoms.length); i++) {
+    for (var i = 0; i < count; i++) {
       final top = tops[random.nextInt(tops.length)];
       final bottom = bottoms[random.nextInt(bottoms.length)];
       final ids = [top.id, bottom.id];
@@ -146,9 +174,9 @@ class WardrobeRepository extends ChangeNotifier {
       results.add(Outfit(
         id: _uuid.v4(),
         garmentIds: ids,
-        name: 'Look ${i + 1}',
+        name: _lookNames[i % _lookNames.length],
         overallScore: score,
-        reason: _reasonForTemp(tempF, occasion),
+        reason: reasons[i % reasons.length],
         isAiGenerated: true,
         tags: [occasion],
       ));
@@ -157,10 +185,10 @@ class WardrobeRepository extends ChangeNotifier {
     return results;
   }
 
-  String _reasonForTemp(double tempF, String occasion) {
-    if (tempF < 50) return 'Layered for cool weather · $occasion';
-    if (tempF > 80) return 'Light and breathable · $occasion';
-    return 'Balanced for today · $occasion';
+  List<String> _reasonsForTemp(double tempF) {
+    if (tempF < 55) return _reasonsCool;
+    if (tempF > 78) return _reasonsWarm;
+    return _reasonsMild;
   }
 
   List<Garment> garmentsForOutfit(Outfit outfit) {

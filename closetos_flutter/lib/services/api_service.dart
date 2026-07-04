@@ -12,6 +12,18 @@ class ApiService {
 
   final http.Client _client;
   String? lastError;
+  String? _authToken;
+
+  void setAuthToken(String? token) => _authToken = token;
+
+  Map<String, String> _headers({bool json = false}) {
+    final headers = <String, String>{};
+    if (json) headers['Content-Type'] = 'application/json';
+    if (_authToken != null) {
+      headers['Authorization'] = 'Bearer $_authToken';
+    }
+    return headers;
+  }
 
   Uri _uri(String path) => Uri.parse('${ApiConfig.baseUrl}$path');
 
@@ -22,6 +34,143 @@ class ApiService {
     } catch (_) {
       return false;
     }
+  }
+
+  Future<AuthResult?> signup({
+    required String name,
+    required String email,
+    required String password,
+  }) async {
+    lastError = null;
+    try {
+      final res = await _client
+          .post(
+            _uri('/auth/signup'),
+            headers: _headers(json: true),
+            body: jsonEncode({
+              'name': name,
+              'email': email,
+              'password': password,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (res.statusCode == 409) {
+        lastError = 'This email is already registered';
+        return null;
+      }
+      if (res.statusCode != 200) {
+        lastError = _parseError(res);
+        return null;
+      }
+
+      final root = jsonDecode(res.body) as Map<String, dynamic>;
+      return AuthResult(
+        token: root['token'] as String,
+        user: AppUser.fromJson(root['user'] as Map<String, dynamic>),
+      );
+    } catch (e) {
+      lastError = e.toString();
+      return null;
+    }
+  }
+
+  Future<AuthResult?> login({
+    required String email,
+    required String password,
+  }) async {
+    lastError = null;
+    try {
+      final res = await _client
+          .post(
+            _uri('/auth/login'),
+            headers: _headers(json: true),
+            body: jsonEncode({
+              'email': email,
+              'password': password,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (res.statusCode == 401) {
+        lastError = 'Invalid email or password';
+        return null;
+      }
+      if (res.statusCode != 200) {
+        lastError = _parseError(res);
+        return null;
+      }
+
+      final root = jsonDecode(res.body) as Map<String, dynamic>;
+      return AuthResult(
+        token: root['token'] as String,
+        user: AppUser.fromJson(root['user'] as Map<String, dynamic>),
+      );
+    } catch (e) {
+      lastError = e.toString();
+      return null;
+    }
+  }
+
+  Future<AppUser?> fetchCurrentUser() async {
+    lastError = null;
+    try {
+      final res = await _client
+          .get(_uri('/auth/me'), headers: _headers())
+          .timeout(const Duration(seconds: 10));
+
+      if (res.statusCode != 200) {
+        lastError = _parseError(res);
+        return null;
+      }
+
+      return AppUser.fromJson(
+        jsonDecode(res.body) as Map<String, dynamic>,
+      );
+    } catch (e) {
+      lastError = e.toString();
+      return null;
+    }
+  }
+
+  Future<AppUser?> updateOnboarding(UserTaste taste) async {
+    lastError = null;
+    try {
+      final res = await _client
+          .patch(
+            _uri('/auth/onboarding'),
+            headers: _headers(json: true),
+            body: jsonEncode({
+              'taste': taste.toJson(),
+              'onboarding_completed': true,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (res.statusCode != 200) {
+        lastError = _parseError(res);
+        return null;
+      }
+
+      return AppUser.fromJson(
+        jsonDecode(res.body) as Map<String, dynamic>,
+      );
+    } catch (e) {
+      lastError = e.toString();
+      return null;
+    }
+  }
+
+  String _parseError(http.Response res) {
+    try {
+      final root = jsonDecode(res.body) as Map<String, dynamic>;
+      final detail = root['detail'];
+      if (detail is String) return detail;
+      if (detail is List && detail.isNotEmpty) {
+        return detail.first['msg']?.toString() ?? 'Request failed';
+      }
+    } catch (_) {}
+    return 'Request failed (${res.statusCode})';
   }
 
   Future<List<DetectedBox>?> detectGarments(Uint8List imageBytes, String filename) async {
