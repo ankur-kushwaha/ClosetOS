@@ -18,6 +18,7 @@ storage/**/*.jpg
 storage/**/*.jpeg
 storage/**/*.png
 storage/.DS_Store
+.models/
 weights/
 *.pt
 *.pth

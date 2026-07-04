@@ -2,7 +2,13 @@
 .gradle/
 build/
 app/build/
-backend/storage/
+# Runtime data under backend/storage/ (keep storage/*.py package code)
+backend/storage/garments/
+backend/storage/temp_sources/
+backend/storage/models/
+backend/storage/**/*.jpg
+backend/storage/**/*.jpeg
+backend/storage/**/*.png
 
 # Local configuration file (contains SDK path, etc.)
 local.properties
