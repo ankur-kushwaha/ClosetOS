@@ -155,13 +155,68 @@ class WardrobeRepository extends ChangeNotifier {
     await _pushGarmentToCloud(garments.last);
   }
 
+  Future<void> updateGarment(Garment updated) async {
+    final idx = garments.indexWhere((g) => g.id == updated.id);
+    if (idx < 0) return;
+    garments[idx] = updated;
+    await _storage.saveGarments(garments);
+    notifyListeners();
+    lastError = null;
+    await _pushGarmentToCloud(garments[idx]);
+  }
+
   Future<void> deleteGarment(String id) async {
+    final garment = garments.cast<Garment?>().firstWhere(
+          (g) => g?.id == id,
+          orElse: () => null,
+        );
+
+    if (garment != null) {
+      await _storage.deleteImageAt(garment.imagePath);
+      if (garment.straightenedImagePath.isNotEmpty) {
+        await _storage.deleteImageAt(garment.straightenedImagePath);
+      }
+    }
+
+    final removedOutfitIds = outfits
+        .where((o) => o.garmentIds.contains(id))
+        .map((o) => o.id)
+        .toSet();
+    for (final outfitId in removedOutfitIds) {
+      tryOnCache.remove(outfitId);
+    }
+
+    outfits = outfits
+        .map(
+          (o) => Outfit(
+            id: o.id,
+            garmentIds: o.garmentIds.where((gid) => gid != id).toList(),
+            name: o.name,
+            overallScore: o.overallScore,
+            reason: o.reason,
+            isFavorite: o.isFavorite,
+            isSaved: o.isSaved,
+            isAiGenerated: o.isAiGenerated,
+            tags: o.tags,
+          ),
+        )
+        .where((o) => o.garmentIds.isNotEmpty)
+        .toList();
+
     garments = garments.where((g) => g.id != id).toList();
     await _storage.saveGarments(garments);
-    if (_api.hasAuth) {
-      await _api.deleteWardrobeItem(id);
-    }
+    await _storage.saveOutfits(outfits);
+    await _storage.saveTryOnCache(tryOnCache);
     notifyListeners();
+
+    lastError = null;
+    if (_api.hasAuth) {
+      final ok = await _api.deleteWardrobeItem(id);
+      if (!ok) {
+        lastError = _api.lastError;
+        notifyListeners();
+      }
+    }
   }
 
   Future<void> toggleLaundry(String id) async {

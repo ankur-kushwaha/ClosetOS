@@ -5,6 +5,7 @@ import '../models/models.dart';
 import '../services/wardrobe_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/garment_detail_sheet.dart';
 import '../widgets/stripe_background.dart';
 
 String _garmentDisplayName(Garment g) {
@@ -246,76 +247,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   }
 
   void _showDetail(BuildContext context, Garment g) {
-    final repo = context.read<WardrobeRepository>();
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.border,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            AspectRatio(
-              aspectRatio: 1,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: AppColors.greige,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.border),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: GarmentImage(
-                  path: g.displayImage,
-                  fit: BoxFit.contain,
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _garmentDisplayName(g),
-              style: AppTypography.display(
-                fontSize: 22,
-                color: AppColors.ink900,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '${g.colorName} · ${g.material} · ${g.fit}',
-              style: AppTypography.ui(fontSize: 13, color: AppColors.ink600),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Worn ${g.wearCount}x',
-              style: AppTypography.ui(fontSize: 13, color: AppColors.ink400),
-            ),
-            const SizedBox(height: 20),
-            OutlinedButton(
-              onPressed: () {
-                repo.deleteGarment(g.id);
-                Navigator.pop(ctx);
-              },
-              child: const Text('Remove from closet'),
-            ),
-          ],
-        ),
-      ),
-    );
+    showGarmentDetailSheet(context, g);
   }
 }
 

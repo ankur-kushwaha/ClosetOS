@@ -169,5 +169,17 @@ class StorageService {
     return base64Encode(await file.readAsBytes());
   }
 
+  Future<void> deleteImageAt(String path) async {
+    if (kIsWeb || path.isEmpty || path.startsWith('http') || path.startsWith('b64://')) {
+      return;
+    }
+    try {
+      final file = File(path);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {}
+  }
+
   static Future<SharedPreferences> prefs() => SharedPreferences.getInstance();
 }

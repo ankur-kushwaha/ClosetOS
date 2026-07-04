@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../models/models.dart';
 import '../services/wardrobe_repository.dart';
 import '../theme/app_theme.dart';
+import '../widgets/garment_attr_field.dart';
 import '../widgets/stripe_background.dart';
 
 enum _IngestPhase { import, review }
@@ -791,7 +792,7 @@ class _ReviewCardState extends State<_ReviewCard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _AttrField(
+                      GarmentAttrField(
                         label: 'Name',
                         controller: _subcategoryCtrl,
                         hint: 'e.g. Crew neck tee',
@@ -800,7 +801,7 @@ class _ReviewCardState extends State<_ReviewCard> {
                       Row(
                         children: [
                           Expanded(
-                            child: _AttrField(
+                            child: GarmentAttrField(
                               label: 'Category',
                               controller: _categoryCtrl,
                               hint: 'Top',
@@ -808,7 +809,7 @@ class _ReviewCardState extends State<_ReviewCard> {
                           ),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: _AttrField(
+                            child: GarmentAttrField(
                               label: 'Color',
                               controller: _colorCtrl,
                               hint: 'Navy',
@@ -820,7 +821,7 @@ class _ReviewCardState extends State<_ReviewCard> {
                       Row(
                         children: [
                           Expanded(
-                            child: _AttrField(
+                            child: GarmentAttrField(
                               label: 'Material',
                               controller: _materialCtrl,
                               hint: 'Cotton',
@@ -828,7 +829,7 @@ class _ReviewCardState extends State<_ReviewCard> {
                           ),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: _AttrField(
+                            child: GarmentAttrField(
                               label: 'Pattern',
                               controller: _patternCtrl,
                               hint: 'Solid',
@@ -837,7 +838,7 @@ class _ReviewCardState extends State<_ReviewCard> {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      _AttrField(
+                      GarmentAttrField(
                         label: 'Fit',
                         controller: _fitCtrl,
                         hint: 'Regular',
@@ -863,65 +864,6 @@ class _ReviewCardState extends State<_ReviewCard> {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _AttrField extends StatelessWidget {
-  const _AttrField({
-    required this.label,
-    required this.controller,
-    required this.hint,
-  });
-
-  final String label;
-  final TextEditingController controller;
-  final String hint;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: AppTypography.ui(
-            fontSize: 11,
-            fontWeight: FontWeight.w500,
-            color: AppColors.ink400,
-          ),
-        ),
-        const SizedBox(height: 4),
-        TextField(
-          controller: controller,
-          style: AppTypography.ui(fontSize: 13, color: AppColors.ink900),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: AppTypography.ui(fontSize: 13, color: AppColors.ink400),
-            isDense: true,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 10,
-            ),
-            filled: true,
-            fillColor: AppColors.greige,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide.none,
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide.none,
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(
-                color: AppColors.clay500.withValues(alpha: 0.5),
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
