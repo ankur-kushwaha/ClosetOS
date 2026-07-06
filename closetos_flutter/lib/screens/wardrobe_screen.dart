@@ -8,10 +8,7 @@ import '../widgets/common.dart';
 import '../widgets/garment_detail_sheet.dart';
 import '../widgets/stripe_background.dart';
 
-String _garmentDisplayName(Garment g) {
-  if (g.subcategory.isNotEmpty) return g.subcategory;
-  return g.category;
-}
+// Display name helper removed
 
 class _WardrobeFilter {
   const _WardrobeFilter(
@@ -39,7 +36,10 @@ class WardrobeScreen extends StatefulWidget {
 class _WardrobeScreenState extends State<WardrobeScreen> {
   static const _filters = [
     _WardrobeFilter('All'),
+    _WardrobeFilter('Tops', category: 'Top'),
+    _WardrobeFilter('Bottoms', category: 'Bottom'),
     _WardrobeFilter('Outerwear', category: 'Outerwear'),
+    _WardrobeFilter('Shoes', category: 'Shoes'),
     _WardrobeFilter('Knitwear', category: 'Top', knitOnly: true),
     _WardrobeFilter('Color', sortByColor: true),
   ];
@@ -343,7 +343,6 @@ class _GarmentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = _garmentDisplayName(garment);
 
     return Material(
       color: AppColors.surface,
@@ -365,15 +364,18 @@ class _GarmentCard extends StatelessWidget {
                   borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(15),
                   ),
-                  child: garment.displayImage.isNotEmpty
-                      ? GarmentImage(
-                          path: garment.displayImage,
-                          fit: BoxFit.contain,
-                        )
-                      : const StripeBackground(
-                          baseColor: AppColors.surface,
-                          opacity: 0.35,
-                        ),
+                  child: Container(
+                    color: Colors.white,
+                    child: garment.displayImage.isNotEmpty
+                        ? GarmentImage(
+                            path: garment.displayImage,
+                            fit: BoxFit.cover,
+                          )
+                        : const StripeBackground(
+                            baseColor: Colors.white,
+                            opacity: 0.35,
+                          ),
+                  ),
                 ),
               ),
               Padding(
@@ -381,24 +383,15 @@ class _GarmentCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTypography.ui(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.ink900,
+                    if (garment.category.isNotEmpty)
+                      Text(
+                        garment.category.toUpperCase(),
+                        style: AppTypography.ui(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.ink600,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      'Worn ${garment.wearCount}x',
-                      style: AppTypography.ui(
-                        fontSize: 12,
-                        color: AppColors.ink600,
-                      ),
-                    ),
                   ],
                 ),
               ),

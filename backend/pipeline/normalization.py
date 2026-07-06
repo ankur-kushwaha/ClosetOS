@@ -25,6 +25,10 @@ def normalize_garment(
     """
     white_bg = composite_white_background(masked_rgba)
     prompt = custom_prompt if custom_prompt is not None else NORMALIZATION_PROMPT
+    if "{label}" in prompt:
+        prompt = prompt.format(label=label)
+    elif "this exact garment" in prompt:
+        prompt = prompt.replace("this exact garment", f"this exact {label}")
 
     if NORMALIZATION_PROVIDER == "openrouter":
         api_key = os.getenv("OPENROUTER_API_KEY") or OPENAI_API_KEY

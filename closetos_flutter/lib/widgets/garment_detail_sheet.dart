@@ -76,6 +76,7 @@ class _GarmentDetailSheetState extends State<_GarmentDetailSheet> {
     _selectedMaterial = g.material;
     _selectedPattern = g.pattern;
     _selectedFit = g.fit;
+    _showNormalized = g.straightenedImagePath.isNotEmpty && g.straightenedImagePath != g.imagePath;
   }
 
   Garment get _latestGarment {
@@ -219,14 +220,7 @@ class _GarmentDetailSheetState extends State<_GarmentDetailSheet> {
     );
     debugPrint("DEBUG build: id=${g.id}, imagePath=${g.imagePath}, straightenedImagePath=${g.straightenedImagePath}, isNormalized=${g.straightenedImagePath.isNotEmpty && g.straightenedImagePath != g.imagePath}");
 
-    final titleParts = [
-      if (g.colorName.isNotEmpty) g.colorName,
-      g.subcategory,
-    ];
-    final title = titleParts.join(' ');
-    final capitalizedTitle = title.isEmpty
-        ? 'Garment'
-        : title[0].toUpperCase() + title.substring(1);
+
 
     final dateStr = g.dateAdded != null
         ? 'Added ${DateFormat('MMM yyyy').format(g.dateAdded!)}'
@@ -274,150 +268,131 @@ class _GarmentDetailSheetState extends State<_GarmentDetailSheet> {
                 const SizedBox(height: 12),
                 if (!_isEditing) ...[
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    mainAxisAlignment: MainAxisAlignment.start,
                     children: [
-                      if (_isNormalized)
-                        SegmentedToggle(
-                          showNormalized: _showNormalized,
-                          onChanged: (val) {
-                            setState(() => _showNormalized = val);
-                          },
-                        )
-                      else
-                        const SizedBox.shrink(),
-                      if (_isNormalized)
-                        OutlinedButton(
-                          onPressed: _discard,
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppColors.error,
-                            side: const BorderSide(color: AppColors.border),
-                            shape: const StadiumBorder(),
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          ),
-                          child: Text(
-                            'Discard',
-                            style: AppTypography.ui(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              color: AppColors.error,
-                            ),
-                          ),
-                        )
-                      else if (_normalizing)
-                        const SizedBox.shrink()
-                      else
-                        OutlinedButton.icon(
-                          onPressed: _normalize,
-                          icon: const Icon(Icons.auto_awesome, size: 16, color: AppColors.ink900),
-                          label: Text(
-                            'Normalize',
-                            style: AppTypography.ui(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              color: AppColors.ink900,
-                            ),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: AppColors.border),
-                            shape: const StadiumBorder(),
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            backgroundColor: AppColors.surface,
-                          ),
-                        ),
+                      SegmentedToggle(
+                        showNormalized: _showNormalized,
+                        onChanged: (val) {
+                          setState(() => _showNormalized = val);
+                        },
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
                 ],
-                if (_normalizing)
-                  AspectRatio(
-                    aspectRatio: 1,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppColors.border),
-                      ),
-                      child: Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const CircularProgressIndicator(color: AppColors.clay500),
-                            const SizedBox(height: 16),
-                            Text(
-                              'Generating normalized output...',
-                              style: AppTypography.ui(fontSize: 14, color: AppColors.ink600),
-                            ),
-                          ],
-                        ),
-                      ),
+                AspectRatio(
+                  aspectRatio: 1,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.border),
                     ),
-                  )
-                else
-                  AspectRatio(
-                    aspectRatio: 1,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppColors.border),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
+                    clipBehavior: Clip.antiAlias,
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: Opacity(
+                            opacity: (_showNormalized && !_isNormalized) ? 0.4 : 1.0,
                             child: GarmentImage(
                               path: (_isNormalized && _showNormalized)
                                   ? g.straightenedImagePath
                                   : g.imagePath,
-                              fit: BoxFit.contain,
+                              fit: BoxFit.cover,
                             ),
                           ),
-                          if (_isNormalized && _showNormalized)
-                            Positioned(
-                              bottom: 12,
-                              left: 0,
-                              right: 0,
-                              child: Center(
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.surface.withOpacity(0.95),
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(color: AppColors.border),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withOpacity(0.04),
-                                        blurRadius: 4,
-                                        offset: const Offset(0, 2),
-                                      )
-                                    ],
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.check, size: 14, color: AppColors.success),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        'bg removed · relit · centered',
-                                        style: AppTypography.ui(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w500,
-                                          color: AppColors.ink600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                        ),
+                        if (_showNormalized && !_isNormalized && !_normalizing)
+                          Center(
+                            child: ElevatedButton.icon(
+                              onPressed: _normalize,
+                              icon: const Icon(Icons.auto_awesome, size: 16, color: AppColors.surface),
+                              label: Text(
+                                'Normalize',
+                                style: AppTypography.ui(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.surface,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.clay500,
+                                foregroundColor: AppColors.surface,
+                                shape: const StadiumBorder(),
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                elevation: 4,
+                                shadowColor: Colors.black.withOpacity(0.15),
+                              ),
+                            ),
+                          ),
+                        if (_isNormalized && _showNormalized)
+                          Positioned(
+                            top: 12,
+                            right: 12,
+                            child: OutlinedButton(
+                              onPressed: _discard,
+                              style: OutlinedButton.styleFrom(
+                                backgroundColor: Colors.white.withOpacity(0.9),
+                                foregroundColor: AppColors.error,
+                                side: BorderSide(color: AppColors.border.withOpacity(0.8)),
+                                shape: const StadiumBorder(),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                elevation: 2,
+                                shadowColor: Colors.black.withOpacity(0.1),
+                              ),
+                              child: Text(
+                                'Discard',
+                                style: AppTypography.ui(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.error,
                                 ),
                               ),
                             ),
-                        ],
-                      ),
+                          ),
+                        if (_normalizing)
+                          Container(
+                            color: Colors.white.withOpacity(0.8),
+                            child: Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const CircularProgressIndicator(color: AppColors.clay500),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'Generating normalized output...',
+                                    style: AppTypography.ui(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                      color: AppColors.ink600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
+                ),
                 const SizedBox(height: 16),
                 if (!_isEditing) ...[
+                  if (g.category.isNotEmpty) ...[
+                    Text(
+                      g.category.toUpperCase(),
+                      style: AppTypography.ui(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.ink600,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                  ],
                   Text(
-                    capitalizedTitle,
+                    g.subcategory.isNotEmpty
+                        ? g.subcategory[0].toUpperCase() + g.subcategory.substring(1)
+                        : 'Garment',
                     style: AppTypography.display(fontSize: 24, color: AppColors.ink900),
                   ),
                   const SizedBox(height: 4),

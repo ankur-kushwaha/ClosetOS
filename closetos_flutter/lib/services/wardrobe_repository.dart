@@ -190,9 +190,19 @@ class WardrobeRepository extends ChangeNotifier {
         return null;
       }
 
+      final labelParts = [
+        if (garment.colorName.isNotEmpty) garment.colorName,
+        if (garment.fit.isNotEmpty) garment.fit,
+        if (garment.pattern.isNotEmpty) garment.pattern,
+        if (garment.material.isNotEmpty) garment.material,
+        if (garment.subcategory.isNotEmpty) garment.subcategory,
+        if (garment.category.isNotEmpty) garment.category,
+      ];
+      final detailedLabel = labelParts.isNotEmpty ? labelParts.join(' ') : 'garment';
+
       final result = await _api.normalizeGarment(
         imageB64,
-        garment.subcategory,
+        detailedLabel,
         garmentId: garment.id,
       );
       if (result == null) {
