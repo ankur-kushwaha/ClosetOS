@@ -25,9 +25,10 @@ class _WardrobeFilter {
 }
 
 class WardrobeScreen extends StatefulWidget {
-  const WardrobeScreen({super.key, this.onAddGarment});
+  const WardrobeScreen({super.key, this.onAddGarment, this.onOpenDrawer});
 
   final VoidCallback? onAddGarment;
+  final VoidCallback? onOpenDrawer;
 
   @override
   State<WardrobeScreen> createState() => _WardrobeScreenState();
@@ -122,6 +123,11 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
+                    IconButton(
+                      icon: const Icon(Icons.menu, size: 22, color: AppColors.ink900),
+                      onPressed: widget.onOpenDrawer,
+                    ),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Your closet',

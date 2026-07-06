@@ -11,7 +11,9 @@ import '../widgets/common.dart';
 import '../widgets/stripe_background.dart';
 
 class OotdScreen extends StatefulWidget {
-  const OotdScreen({super.key});
+  const OotdScreen({super.key, this.onOpenDrawer});
+
+  final VoidCallback? onOpenDrawer;
 
   @override
   State<OotdScreen> createState() => _OotdScreenState();
@@ -58,7 +60,8 @@ class _OotdScreenState extends State<OotdScreen>
       _tryOnLoading = true;
       _tryOnPath = null;
     });
-    final path = await context.read<WardrobeRepository>().renderTryOn(outfit);
+    final repo = context.read<WardrobeRepository>();
+    final path = await repo.renderTryOn(outfit);
     if (mounted) {
       setState(() {
         _tryOnPath = path;
@@ -68,6 +71,15 @@ class _OotdScreenState extends State<OotdScreen>
         _revealController
           ..reset()
           ..forward();
+      } else {
+        final err = repo.lastError ?? 'Try-on failed. Add a selfie in your profile first.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(err, style: AppTypography.ui(color: AppColors.surface, fontSize: 14)),
+            backgroundColor: AppColors.ink900,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
     }
   }
@@ -152,7 +164,7 @@ class _OotdScreenState extends State<OotdScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _TopBar(weather: _weather),
+                _TopBar(weather: _weather, onOpenDrawer: widget.onOpenDrawer),
                 Expanded(
                   child: outfit == null
                       ? const _EmptyState()
@@ -163,6 +175,7 @@ class _OotdScreenState extends State<OotdScreen>
                             tryOnPath: _tryOnPath,
                             tryOnLoading: _tryOnLoading,
                             onRequestTryOn: () => _loadTryOn(outfit),
+                            onClearTryOn: () => setState(() => _tryOnPath = null),
                           ),
                         ),
                 ),
@@ -186,9 +199,10 @@ class _OotdScreenState extends State<OotdScreen>
 }
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({this.weather});
+  const _TopBar({this.weather, this.onOpenDrawer});
 
   final WeatherInfo? weather;
+  final VoidCallback? onOpenDrawer;
 
   @override
   Widget build(BuildContext context) {
@@ -200,6 +214,11 @@ class _TopBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
       child: Row(
         children: [
+          _CircleIconButton(
+            icon: Icons.menu,
+            onPressed: onOpenDrawer,
+          ),
+          const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
@@ -247,12 +266,14 @@ class _HeroRender extends StatelessWidget {
     required this.tryOnPath,
     required this.tryOnLoading,
     required this.onRequestTryOn,
+    required this.onClearTryOn,
   });
 
   final List<Garment> garments;
   final String? tryOnPath;
   final bool tryOnLoading;
   final VoidCallback onRequestTryOn;
+  final VoidCallback onClearTryOn;
 
   @override
   Widget build(BuildContext context) {
@@ -262,38 +283,131 @@ class _HeroRender extends StatelessWidget {
         alignment: Alignment.center,
         children: [
           if (tryOnLoading)
-            const Center(
-              child: SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(strokeWidth: 2),
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(color: AppColors.clay500),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Generating Try-on Outfit...',
+                    style: AppTypography.ui(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.ink900,
+                    ),
+                  ),
+                ],
               ),
             )
           else if (tryOnPath != null)
-            Positioned.fill(
-              child: GarmentImage(path: tryOnPath!, fit: BoxFit.contain),
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                Positioned.fill(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: GarmentImage(path: tryOnPath!, fit: BoxFit.contain),
+                  ),
+                ),
+                Positioned(
+                  top: 12,
+                  right: 12,
+                  child: Material(
+                    color: Colors.black54,
+                    shape: const CircleBorder(),
+                    child: IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white, size: 18),
+                      onPressed: onClearTryOn,
+                    ),
+                  ),
+                ),
+              ],
             )
           else if (garments.isNotEmpty)
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: onRequestTryOn,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    for (var i = 0; i < garments.length; i++)
-                      Positioned(
-                        top: 40 + i * 18.0,
-                        child: SizedBox(
-                          height: 220,
-                          child: GarmentImage(
-                            path: garments[i].displayImage,
-                            fit: BoxFit.contain,
+            Column(
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: garments.map((g) {
+                        return Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 6.0),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: AppColors.surface,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: AppColors.border),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: GarmentImage(
+                                      path: g.displayImage,
+                                      fit: BoxFit.contain,
+                                    ),
+                                  ),
+                                  Positioned(
+                                    bottom: 8,
+                                    left: 8,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.canvas.withValues(alpha: 0.8),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        g.category,
+                                        style: AppTypography.ui(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.ink900,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                  ],
+                        );
+                      }).toList(),
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(height: 8),
+                Material(
+                  color: AppColors.clay500,
+                  borderRadius: BorderRadius.circular(24),
+                  child: InkWell(
+                    onTap: onRequestTryOn,
+                    borderRadius: BorderRadius.circular(24),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.auto_awesome, color: AppColors.surface, size: 16),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Virtual Try-on',
+                            style: AppTypography.ui(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.surface,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
             )
           else
             Center(
@@ -526,7 +640,7 @@ class _CircleIconButton extends StatelessWidget {
   });
 
   final IconData icon;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final Color? borderColor;
   final Color? iconColor;
 

@@ -135,17 +135,26 @@ class ApiService {
     }
   }
 
-  Future<AppUser?> updateOnboarding(UserTaste taste) async {
+  Future<AppUser?> updateProfile({
+    required UserTaste taste,
+    String? name,
+    String? email,
+    bool? onboardingCompleted,
+  }) async {
     lastError = null;
     try {
+      final body = <String, dynamic>{
+        'taste': taste.toJson(),
+        if (onboardingCompleted != null) 'onboarding_completed': onboardingCompleted,
+        if (name != null) 'name': name,
+        if (email != null) 'email': email,
+      };
+
       final res = await _client
           .patch(
             _uri('/auth/onboarding'),
             headers: _headers(json: true),
-            body: jsonEncode({
-              'taste': taste.toJson(),
-              'onboarding_completed': true,
-            }),
+            body: jsonEncode(body),
           )
           .timeout(const Duration(seconds: 15));
 
@@ -157,6 +166,39 @@ class ApiService {
       return AppUser.fromJson(
         jsonDecode(res.body) as Map<String, dynamic>,
       );
+    } catch (e) {
+      lastError = e.toString();
+      return null;
+    }
+  }
+
+  Future<AppUser?> updateOnboarding(UserTaste taste) async {
+    return updateProfile(taste: taste, onboardingCompleted: true);
+  }
+
+  Future<String?> uploadSelfie(Uint8List imageBytes, String filename) async {
+    lastError = null;
+    try {
+      final request = http.MultipartRequest('POST', _uri('/auth/selfie'));
+      if (_authToken != null) {
+        request.headers['Authorization'] = 'Bearer $_authToken';
+      }
+      request.files.add(http.MultipartFile.fromBytes(
+        'file',
+        imageBytes,
+        filename: filename,
+        contentType: MediaType('image', 'jpeg'),
+      ));
+
+      final streamed = await request.send().timeout(const Duration(seconds: 60));
+      final res = await http.Response.fromStream(streamed);
+      if (res.statusCode != 200) {
+        lastError = 'Selfie upload failed (${res.statusCode})';
+        return null;
+      }
+
+      final root = jsonDecode(res.body) as Map<String, dynamic>;
+      return root['selfie_url'] as String?;
     } catch (e) {
       lastError = e.toString();
       return null;

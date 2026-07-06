@@ -799,8 +799,10 @@ class LoginPayload(BaseModel):
 
 
 class OnboardingPayload(BaseModel):
-    taste: Dict[str, Any]
-    onboarding_completed: bool = True
+    taste: Optional[Dict[str, Any]] = None
+    onboarding_completed: Optional[bool] = None
+    name: Optional[str] = None
+    email: Optional[str] = None
 
 
 def _public_user(user: Dict[str, Any]) -> Dict[str, Any]:
@@ -860,6 +862,8 @@ def update_onboarding(
         user_id,
         taste=payload.taste,
         onboarding_completed=payload.onboarding_completed,
+        name=payload.name,
+        email=payload.email,
     )
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to save onboarding")
@@ -868,6 +872,27 @@ def update_onboarding(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return _public_user(user)
+
+
+@app.post("/auth/selfie")
+def upload_selfie(
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+):
+    try:
+        data = file.file.read()
+        selfie_url = upload_image(data, user_id, "profile", "selfie.png")
+        user = db_manager.get_user_by_id(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        taste = user.get("taste") or {}
+        taste["selfie"] = selfie_url
+        db_manager.update_user_profile(user_id, taste=taste)
+        return {"selfie_url": selfie_url}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # --- Wardrobe sync (Cloudflare R2 or local disk for images) ---

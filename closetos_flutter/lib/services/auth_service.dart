@@ -113,6 +113,40 @@ class AuthService extends ChangeNotifier {
     return true;
   }
 
+  Future<bool> updateProfile({
+    required UserTaste taste,
+    String? name,
+    String? email,
+  }) async {
+    lastError = null;
+    isLoading = true;
+    notifyListeners();
+
+    final user = await _api.updateProfile(
+      taste: taste,
+      name: name,
+      email: email,
+    );
+
+    isLoading = false;
+    if (user == null) {
+      lastError = _api.lastError ?? 'Failed to update profile';
+      notifyListeners();
+      return false;
+    }
+
+    currentUser = user;
+    if (name != null) {
+      await _storage.setUserName(name);
+    }
+    if (email != null) {
+      await _storage.setUserEmail(email);
+    }
+    await _storage.saveTaste(taste);
+    notifyListeners();
+    return true;
+  }
+
   Future<void> _persistSession(String token, AppUser user) async {
     await _storage.setAuthToken(token);
     await _storage.setUserId(user.userId);

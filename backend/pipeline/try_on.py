@@ -10,6 +10,7 @@ from .config import (
     GOOGLE_CLOUD_PROJECT,
     TRY_ON_MODEL,
     TRY_ON_PROVIDER,
+    OPENAI_API_KEY,
 )
 from .orchestrator import map_to_try_on_category, map_to_try_on_subcategory
 
@@ -165,12 +166,115 @@ def _make_client():
     return genai.Client(api_key=GEMINI_API_KEY)
 
 
-def render_try_on(person_image_base64: str, garments: List[dict]) -> dict:
-    if TRY_ON_PROVIDER != "vertex" and not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY is not configured")
+def _render_openrouter_try_on(person_image_base64: str, garments: List[dict]) -> dict:
+    from openai import OpenAI
+    import re
 
+    api_key = os.getenv("OPENROUTER_API_KEY") or OPENAI_API_KEY
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY or OPENAI_API_KEY is not configured")
+
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key,
+    )
+
+    def sort_key(g: dict) -> int:
+        cat = map_to_try_on_category(g.get("category", ""))
+        return GARMENT_LAYER_ORDER.get(cat, 99)
+
+    sorted_garments = sorted(garments, key=sort_key)
+    person_bytes, person_mime = _decode_image(person_image_base64)
+
+    person_uri = f"data:{person_mime};base64,{person_image_base64}"
+
+    content_parts = [
+        {"type": "text", "text": _build_try_on_prompt(sorted_garments)},
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": person_uri
+            }
+        }
+    ]
+
+    for garment in sorted_garments:
+        img_b64 = garment.get("image_base64")
+        if not img_b64:
+            continue
+        g_bytes, g_mime = _decode_image(img_b64)
+        content_parts.append({
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:{g_mime};base64,{img_b64}"
+            }
+        })
+
+    messages = [
+        {
+            "role": "user",
+            "content": content_parts
+        }
+    ]
+
+    response = client.chat.completions.create(
+        model=TRY_ON_MODEL,
+        messages=messages,
+        extra_body={
+            "modalities": ["image", "text"]
+        }
+    )
+
+    if response.choices and len(response.choices) > 0:
+        message = response.choices[0].message
+        message_dict = message.model_dump()
+        images = message_dict.get("images") or getattr(message, "images", None)
+        if images and len(images) > 0:
+            for img_obj in images:
+                if isinstance(img_obj, dict):
+                    url = img_obj.get("image_url", {}).get("url", "")
+                    match = re.search(r"data:image/(?:png|jpeg|webp);base64,([A-Za-z0-9+/=]+)", url)
+                    if match:
+                        return {
+                            "image_base64": match.group(1),
+                            "provider": f"openrouter:{TRY_ON_MODEL}",
+                            "garment_count": len(sorted_garments)
+                        }
+
+        content = message.content
+        if content:
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "image_url":
+                        url = part.get("image_url", {}).get("url", "")
+                        match = re.search(r"data:image/(?:png|jpeg|webp);base64,([A-Za-z0-9+/=]+)", url)
+                        if match:
+                            return {
+                                "image_base64": match.group(1),
+                                "provider": f"openrouter:{TRY_ON_MODEL}",
+                                "garment_count": len(sorted_garments)
+                            }
+            elif isinstance(content, str):
+                match = re.search(r"data:image/(?:png|jpeg|webp);base64,([A-Za-z0-9+/=]+)", content)
+                if match:
+                    return {
+                        "image_base64": match.group(1),
+                        "provider": f"openrouter:{TRY_ON_MODEL}",
+                        "garment_count": len(sorted_garments)
+                    }
+
+    raise RuntimeError("OpenRouter try-on returned no image")
+
+
+def render_try_on(person_image_base64: str, garments: List[dict]) -> dict:
     if not garments:
         raise ValueError("At least one garment is required")
+
+    if TRY_ON_PROVIDER == "openrouter":
+        return _render_openrouter_try_on(person_image_base64, garments)
+
+    if TRY_ON_PROVIDER != "vertex" and not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY is not configured")
 
     from google.genai import types
 

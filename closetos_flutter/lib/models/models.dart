@@ -235,18 +235,21 @@ class UserTaste {
     this.colorsAvoided = const [],
     this.preferredFits = const [],
     this.occasions = const [],
+    this.selfie,
   });
 
   final List<String> preferredStyles;
   final List<String> colorsAvoided;
   final List<String> preferredFits;
   final List<String> occasions;
+  final String? selfie;
 
   Map<String, dynamic> toJson() => {
         'preferredStyles': preferredStyles,
         'colorsAvoided': colorsAvoided,
         'preferredFits': preferredFits,
         'occasions': occasions,
+        if (selfie != null) 'selfie': selfie,
       };
 
   factory UserTaste.fromJson(Map<String, dynamic> json) => UserTaste(
@@ -266,6 +269,7 @@ class UserTaste {
                 ?.map((e) => e.toString())
                 .toList() ??
             const [],
+        selfie: json['selfie'] as String?,
       );
 }
 

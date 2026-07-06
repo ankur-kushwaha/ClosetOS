@@ -796,6 +796,8 @@ class DatabaseManager:
         user_id: str,
         taste: Optional[Dict[str, Any]] = None,
         onboarding_completed: Optional[bool] = None,
+        name: Optional[str] = None,
+        email: Optional[str] = None,
     ) -> bool:
         conn = self.get_connection()
         try:
@@ -812,6 +814,12 @@ class DatabaseManager:
                 )
                 updates.append(col)
                 params.append(onboarding_completed)
+            if name is not None:
+                updates.append("name = %s" if self.db_type == "postgres" else "name = ?")
+                params.append(name)
+            if email is not None:
+                updates.append("email = %s" if self.db_type == "postgres" else "email = ?")
+                params.append(email)
 
             if not updates:
                 return True

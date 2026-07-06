@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -64,8 +65,27 @@ class WardrobeRepository extends ChangeNotifier {
 
       // Push local-only items not yet on the server
       for (final local in localBefore) {
-        if (remoteIds.contains(local.id)) continue;
-        await _pushGarmentToCloud(local);
+         if (remoteIds.contains(local.id)) continue;
+         await _pushGarmentToCloud(local);
+      }
+
+      // Sync taste and download selfie if needed
+      final user = await _api.fetchCurrentUser();
+      if (user != null && user.taste != null) {
+        taste = user.taste!;
+        await _storage.saveTaste(taste);
+        final selfieUrl = taste.selfie;
+        if (selfieUrl != null && selfieUrl.isNotEmpty) {
+          final localSelfiePath = _storage.digitalTwinPath;
+          if (localSelfiePath == null || !File(localSelfiePath).existsSync()) {
+            final bytes = await _api.downloadImage(selfieUrl);
+            if (bytes != null) {
+              final newPath = await _storage.saveImageBytes(bytes, 'selfie');
+              digitalTwinPath = newPath;
+              await _storage.setDigitalTwinPath(newPath);
+            }
+          }
+        }
       }
     } finally {
       isSyncing = false;
@@ -122,13 +142,64 @@ class WardrobeRepository extends ChangeNotifier {
 
   Future<void> completeOnboarding(UserTaste newTaste, Uint8List? selfieBytes) async {
     taste = newTaste;
+    String? selfieUrl;
     if (selfieBytes != null) {
       digitalTwinPath = await _storage.saveImageBytes(selfieBytes, 'selfie');
       await _storage.setDigitalTwinPath(digitalTwinPath!);
+      if (_api.hasAuth) {
+        selfieUrl = await _api.uploadSelfie(selfieBytes, 'selfie.jpg');
+      }
+    }
+    if (selfieUrl != null) {
+      taste = UserTaste(
+        preferredStyles: newTaste.preferredStyles,
+        colorsAvoided: newTaste.colorsAvoided,
+        preferredFits: newTaste.preferredFits,
+        occasions: newTaste.occasions,
+        selfie: selfieUrl,
+      );
     }
     await _storage.saveTaste(taste);
     await _storage.setOnboardingComplete();
     notifyListeners();
+  }
+
+  Future<bool> updateSelfie(Uint8List selfieBytes) async {
+    isLoading = true;
+    lastError = null;
+    notifyListeners();
+
+    try {
+      final newPath = await _storage.saveImageBytes(selfieBytes, 'selfie');
+      digitalTwinPath = newPath;
+      await _storage.setDigitalTwinPath(newPath);
+
+      if (_api.hasAuth) {
+        final url = await _api.uploadSelfie(selfieBytes, 'selfie.jpg');
+        if (url != null) {
+          taste = UserTaste(
+            preferredStyles: taste.preferredStyles,
+            colorsAvoided: taste.colorsAvoided,
+            preferredFits: taste.preferredFits,
+            occasions: taste.occasions,
+            selfie: url,
+          );
+          await _storage.saveTaste(taste);
+          await _api.updateProfile(taste: taste);
+        } else {
+          lastError = _api.lastError;
+        }
+      }
+      notifyListeners();
+      return lastError == null;
+    } catch (e) {
+      lastError = e.toString();
+      notifyListeners();
+      return false;
+    } finally {
+      isLoading = false;
+      notifyListeners();
+    }
   }
 
   Future<void> addGarment(Garment garment) async {

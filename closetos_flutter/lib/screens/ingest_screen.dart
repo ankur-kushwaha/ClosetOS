@@ -16,9 +16,10 @@ import '../widgets/stripe_background.dart';
 enum _IngestPhase { import, review }
 
 class IngestScreen extends StatefulWidget {
-  const IngestScreen({super.key, this.onReviewComplete});
+  const IngestScreen({super.key, this.onReviewComplete, this.onOpenDrawer});
 
   final VoidCallback? onReviewComplete;
+  final VoidCallback? onOpenDrawer;
 
   @override
   State<IngestScreen> createState() => _IngestScreenState();
@@ -328,6 +329,7 @@ class _IngestScreenState extends State<IngestScreen> {
               },
               onScanSelected: _processSelected,
               onPickFromCamera: _pickFromCamera,
+              onOpenDrawer: widget.onOpenDrawer,
             ),
     );
   }
@@ -351,6 +353,7 @@ class _ImportView extends StatelessWidget {
     required this.onToggleSelect,
     required this.onScanSelected,
     required this.onPickFromCamera,
+    this.onOpenDrawer,
   });
 
   final bool detecting;
@@ -368,6 +371,7 @@ class _ImportView extends StatelessWidget {
   final void Function(GalleryItem item) onToggleSelect;
   final VoidCallback onScanSelected;
   final VoidCallback onPickFromCamera;
+  final VoidCallback? onOpenDrawer;
 
   @override
   Widget build(BuildContext context) {
@@ -378,6 +382,15 @@ class _ImportView extends StatelessWidget {
       return ListView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton(
+              icon: const Icon(Icons.menu, size: 22, color: AppColors.ink900),
+              padding: EdgeInsets.zero,
+              onPressed: onOpenDrawer,
+            ),
+          ),
+          const SizedBox(height: 4),
           Text(
             'Add your closet',
             style: AppTypography.display(
@@ -457,6 +470,12 @@ class _ImportView extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    IconButton(
+                      icon: const Icon(Icons.menu, size: 22, color: AppColors.ink900),
+                      padding: EdgeInsets.zero,
+                      onPressed: onOpenDrawer,
+                    ),
+                    const SizedBox(height: 4),
                     Text(
                       'Add your closet',
                       style: AppTypography.display(
