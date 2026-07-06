@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 import torch
 import numpy as np
 from PIL import Image, ImageOps
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -220,6 +220,7 @@ class CropPayload(BaseModel):
     crop_base64: str
     label: str
     caption: Optional[str] = None
+    garment_id: Optional[str] = None
 
 class PrecomputedAttributes(BaseModel):
     category: str
@@ -463,18 +464,51 @@ def extract_garment_metadata_bulk(payload: BulkMetadataPayload):
     return {"items": results}
 
 
-@app.post("/yolo-world/gpt-normalize")
-def gpt_normalize_crop(payload: CropPayload):
-    """Passthrough — return the crop unchanged (normalization disabled for speed)."""
+@app.post("/yolo-world/normalize")
+def normalize_crop(payload: CropPayload, request: Request):
     try:
         crop_bytes = base64.b64decode(payload.crop_base64)
         crop_img = Image.open(io.BytesIO(crop_bytes)).convert("RGBA")
 
-        buffered = io.BytesIO()
-        crop_img.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        normalized, provider = normalize_garment(crop_img, payload.label or "garment")
 
-        return {"image_base64": img_str, "provider": "none"}
+        buffered = io.BytesIO()
+        normalized.save(buffered, format="PNG")
+        img_bytes = buffered.getvalue()
+        img_str = base64.b64encode(img_bytes).decode("utf-8")
+
+        straightened_url = None
+        # Extract user_id if authenticated
+        auth_header = request.headers.get("Authorization")
+        user_id = None
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+            from auth import decode_token
+            user_id = decode_token(token)
+
+        if payload.garment_id and user_id:
+            # Upload straightened image directly to R2 / local disk
+            straightened_url = upload_image(img_bytes, user_id, payload.garment_id, "straightened.png")
+            # Fetch the existing wardrobe item
+            existing_item = db_manager.get_wardrobe_item(user_id, payload.garment_id)
+            if existing_item:
+                stored_json = {k: v for k, v in existing_item.items() if k not in ("imagePath", "straightenedImagePath")}
+                existing_image_url = existing_item.get("imagePath")
+                db_manager.upsert_wardrobe_item(
+                    user_id=user_id,
+                    item_id=payload.garment_id,
+                    garment_json=stored_json,
+                    image_url=existing_image_url,
+                    straightened_image_url=straightened_url
+                )
+            if straightened_url and straightened_url.startswith("http"):
+                straightened_url = f"{straightened_url}?v={int(time.time())}"
+
+        return {
+            "image_base64": img_str,
+            "provider": provider,
+            "straightened_image_url": straightened_url
+        }
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -606,7 +640,7 @@ def yolo_world_finalize(payload: FinalizePayload):
         return {
             "garment_id": g_id,
             "image_base64": payload.image_base64,
-            "straightened_image_base64": payload.image_base64,
+            "straightened_image_base64": None,
             "attributes": response_attrs,
         }
     except Exception as e:
@@ -889,7 +923,10 @@ def _sync_wardrobe_item(
         garment.get("straightenedImagePath"), straightened_image_base64
     )
     if straight_bytes:
-        straightened_url = upload_image(straight_bytes, user_id, item_id, "straightened.png")
+        if crop_bytes and straight_bytes == crop_bytes:
+            straightened_url = image_url
+        else:
+            straightened_url = upload_image(straight_bytes, user_id, item_id, "straightened.png")
     elif crop_bytes and not straightened_url:
         straightened_url = image_url
 
@@ -1032,4 +1069,4 @@ if __name__ == "__main__":
     print(f" 📍 Localhost Access URL:    http://127.0.0.1:8000")
     print(f" 📍 Interactive API Test UI: http://127.0.0.1:8000/test")
     print("="*70 + "\n")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)

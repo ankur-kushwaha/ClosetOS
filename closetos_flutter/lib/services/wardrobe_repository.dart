@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -83,6 +84,7 @@ class WardrobeRepository extends ChangeNotifier {
           extractB64Payload(garment.imagePath);
     }
     if (garment.straightenedImagePath.isNotEmpty &&
+        garment.straightenedImagePath != garment.imagePath &&
         !garment.straightenedImagePath.startsWith('http')) {
       straightB64 = await _storage.readFileAsBase64(
             garment.straightenedImagePath,
@@ -165,6 +167,85 @@ class WardrobeRepository extends ChangeNotifier {
     notifyListeners();
     lastError = null;
     await _pushGarmentToCloud(garments[idx]);
+  }
+
+  Future<String?> normalizeGarment(Garment garment) async {
+    lastError = null;
+    notifyListeners();
+
+    try {
+      String? imageB64;
+      if (garment.imagePath.startsWith('http')) {
+        final bytes = await _api.downloadImage(garment.imagePath);
+        if (bytes != null) {
+          imageB64 = base64Encode(bytes);
+        }
+      } else {
+        imageB64 = await _storage.readFileAsBase64(garment.imagePath);
+      }
+
+      if (imageB64 == null) {
+        lastError = 'Could not load garment image for normalization';
+        notifyListeners();
+        return null;
+      }
+
+      final result = await _api.normalizeGarment(
+        imageB64,
+        garment.subcategory,
+        garmentId: garment.id,
+      );
+      if (result == null) {
+        lastError = _api.lastError ?? 'Normalization failed';
+        notifyListeners();
+        return null;
+      }
+
+      final normalizedB64 = result['image_base64'] as String? ?? '';
+      final straightenedUrl = result['straightened_image_url'] as String?;
+
+      String straightenedPath;
+      if (straightenedUrl != null && straightenedUrl.isNotEmpty) {
+        straightenedPath = straightenedUrl;
+      } else {
+        if (normalizedB64.isEmpty) {
+          lastError = 'Normalization returned empty image';
+          notifyListeners();
+          return null;
+        }
+        straightenedPath = await _storage.saveImageFromBase64(normalizedB64, 'normalized');
+      }
+
+      final updated = garment.copyWith(straightenedImagePath: straightenedPath);
+      final idx = garments.indexWhere((g) => g.id == updated.id);
+      if (idx >= 0) {
+        garments[idx] = updated;
+      }
+      await _storage.saveGarments(garments);
+      notifyListeners();
+      return straightenedPath;
+    } catch (e) {
+      lastError = e.toString();
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<void> discardNormalized(Garment garment) async {
+    lastError = null;
+    notifyListeners();
+
+    try {
+      if (garment.straightenedImagePath.isNotEmpty &&
+          garment.straightenedImagePath != garment.imagePath) {
+        await _storage.deleteImageAt(garment.straightenedImagePath);
+      }
+      final updated = garment.copyWith(straightenedImagePath: '');
+      await updateGarment(updated);
+    } catch (e) {
+      lastError = e.toString();
+      notifyListeners();
+    }
   }
 
   Future<void> deleteGarment(String id) async {
@@ -442,11 +523,15 @@ class WardrobeRepository extends ChangeNotifier {
       var garment = result;
       if (garment.imagePath.startsWith('b64://')) {
         final cropB64 = extractB64Payload(garment.imagePath)!;
-        final straightB64 = extractB64Payload(garment.straightenedImagePath)!;
+        final straightB64 = extractB64Payload(garment.straightenedImagePath) ?? '';
+        final savedCropPath = await _storage.saveImageFromBase64(cropB64, 'crop');
+        final hasStraight = straightB64.isNotEmpty && straightB64 != cropB64;
+        final savedStraightPath = hasStraight
+            ? await _storage.saveImageFromBase64(straightB64, 'straight')
+            : savedCropPath;
         garment = garment.copyWith(
-          imagePath: await _storage.saveImageFromBase64(cropB64, 'crop'),
-          straightenedImagePath:
-              await _storage.saveImageFromBase64(straightB64, 'straight'),
+          imagePath: savedCropPath,
+          straightenedImagePath: savedStraightPath,
         );
       }
 

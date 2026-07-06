@@ -487,21 +487,85 @@ class DatabaseManager:
             conn.close()
         return items
 
+    def get_wardrobe_item(self, user_id: str, item_id: str) -> Optional[Dict[str, Any]]:
+        conn = self.get_connection()
+        try:
+            if self.db_type == "postgres":
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT item_id, garment_json, image_url, straightened_image_url,
+                               created_at, updated_at
+                        FROM wardrobe_items WHERE user_id = %s AND item_id = %s;
+                        """,
+                        (user_id, item_id),
+                    )
+                    row = cur.fetchone()
+                if row:
+                    return self._wardrobe_row_to_dict(row, is_postgres=True)
+            else:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT item_id, garment_json, image_url, straightened_image_url,
+                           created_at, updated_at
+                    FROM wardrobe_items WHERE user_id = ? AND item_id = ?;
+                    """,
+                    (user_id, item_id),
+                )
+                row = cur.fetchone()
+                if row:
+                    return self._wardrobe_row_to_dict(row, is_postgres=False)
+        except Exception as e:
+            print(f"Error fetching single wardrobe item: {e}")
+        finally:
+            conn.close()
+        return None
+
+
     def _wardrobe_row_to_dict(self, row, is_postgres: bool) -> Dict[str, Any]:
+        import re
+        updated_at = None
         if is_postgres:
             garment = json.loads(row[1])
             garment["id"] = str(row[0])
-            if row[2]:
-                garment["imagePath"] = row[2]
-            if row[3]:
-                garment["straightenedImagePath"] = row[3]
-            return garment
-        garment = json.loads(row["garment_json"])
-        garment["id"] = row["item_id"]
-        if row["image_url"]:
-            garment["imagePath"] = row["image_url"]
-        if row["straightened_image_url"]:
-            garment["straightenedImagePath"] = row["straightened_image_url"]
+            image_path = row[2]
+            straightened_path = row[3]
+            if len(row) > 5 and row[5]:
+                updated_at = row[5]
+        else:
+            garment = json.loads(row["garment_json"])
+            garment["id"] = row["item_id"]
+            image_path = row["image_url"]
+            straightened_path = row["straightened_image_url"]
+            try:
+                updated_at = row["updated_at"]
+            except (KeyError, IndexError):
+                pass
+
+        version = ""
+        if updated_at:
+            if isinstance(updated_at, (int, float)):
+                version = str(int(updated_at))
+            elif hasattr(updated_at, "timestamp"):
+                version = str(int(updated_at.timestamp()))
+            else:
+                version = re.sub(r"\W+", "", str(updated_at))
+
+        def append_version(url: Optional[str]) -> Optional[str]:
+            if not url or not version:
+                return url
+            if not url.startswith("http"):
+                return url
+            if "?" in url:
+                return f"{url}&v={version}"
+            return f"{url}?v={version}"
+
+        if image_path:
+            garment["imagePath"] = append_version(image_path)
+        if straightened_path:
+            garment["straightenedImagePath"] = append_version(straightened_path)
+
         return garment
 
     def upsert_wardrobe_item(

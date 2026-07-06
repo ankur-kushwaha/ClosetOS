@@ -219,14 +219,24 @@ class ApiService {
     }
   }
 
-  Future<String?> normalizeGarment(String cropBase64, String label) async {
+  Future<Map<String, dynamic>?> normalizeGarment(
+    String cropBase64,
+    String label, {
+    String? garmentId,
+  }) async {
     lastError = null;
     try {
+      final payload = <String, dynamic>{
+        'crop_base64': cropBase64,
+        'label': label,
+        if (garmentId != null) 'garment_id': garmentId,
+      };
+
       final res = await _client
           .post(
-            _uri('/yolo-world/gpt-normalize'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'crop_base64': cropBase64, 'label': label}),
+            _uri('/yolo-world/normalize'),
+            headers: _headers(json: true),
+            body: jsonEncode(payload),
           )
           .timeout(const Duration(minutes: 2));
 
@@ -234,8 +244,7 @@ class ApiService {
         lastError = 'Normalization failed (${res.statusCode})';
         return null;
       }
-      final root = jsonDecode(res.body) as Map<String, dynamic>;
-      return root['image_base64'] as String?;
+      return jsonDecode(res.body) as Map<String, dynamic>;
     } catch (e) {
       lastError = e.toString();
       return null;
@@ -578,6 +587,20 @@ class ApiService {
     } catch (e) {
       lastError = e.toString();
       return false;
+    }
+  }
+
+  Future<Uint8List?> downloadImage(String url) async {
+    try {
+      final res = await _client.get(Uri.parse(url)).timeout(const Duration(seconds: 30));
+      if (res.statusCode == 200) {
+        return res.bodyBytes;
+      }
+      lastError = 'Failed to download image (${res.statusCode})';
+      return null;
+    } catch (e) {
+      lastError = e.toString();
+      return null;
     }
   }
 
