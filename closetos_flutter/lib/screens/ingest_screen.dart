@@ -1,7 +1,10 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:photo_manager/photo_manager.dart';
 import 'package:provider/provider.dart';
 
 import '../models/models.dart';
@@ -24,6 +27,26 @@ class IngestScreen extends StatefulWidget {
 class _IngestScreenState extends State<IngestScreen> {
   final _picker = ImagePicker();
 
+  static const List<String> _mockImages = [
+    'https://images.unsplash.com/photo-1541099649105-f69ad21f3246?w=400&q=80', // jeans
+    'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=400&q=80', // t-shirt
+    'https://images.unsplash.com/photo-1596755094514-f87e34085b2c?w=400&q=80', // shirt
+    'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400&q=80', // jacket
+    'https://images.unsplash.com/photo-1584917865442-de89df76afd3?w=400&q=80', // handbag
+    'https://images.unsplash.com/photo-1608231387042-66d1773070a5?w=400&q=80', // shoes
+    'https://images.unsplash.com/photo-1578587018452-892bacefd3f2?w=400&q=80', // dress
+    'https://images.unsplash.com/photo-1591047139829-d91aecb6caea?w=400&q=80', // coat
+    'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=400&q=80', // fashion dress
+    'https://images.unsplash.com/photo-1551488831-00ddcb6c6bd3?w=400&q=80', // sweatshirt
+    'https://images.unsplash.com/photo-1576566588028-4147f3842f27?w=400&q=80', // sweater
+    'https://images.unsplash.com/photo-1434389677669-e08b4cac3105?w=400&q=80', // blouse
+  ];
+
+  List<GalleryItem> _galleryItems = [];
+  final List<GalleryItem> _selectedGalleryItems = [];
+  bool _galleryLoading = true;
+  bool _hasGalleryPermission = false;
+
   _IngestPhase _phase = _IngestPhase.import;
   bool _detecting = false;
   bool _fetchingMetadata = false;
@@ -42,12 +65,54 @@ class _IngestScreenState extends State<IngestScreen> {
       ? _reviewQueue[_reviewIndex + 1]
       : null;
 
-  Future<void> _pickBulkPhotos() async {
-    if (_detecting) return;
+  @override
+  void initState() {
+    super.initState();
+    _loadGallery();
+  }
 
-    final picked = await _picker.pickMultiImage(imageQuality: 85);
-    if (picked.isEmpty || !mounted) return;
+  Future<void> _loadGallery() async {
+    if (kIsWeb) {
+      if (!mounted) return;
+      setState(() {
+        _galleryItems = _mockImages.map((url) => GalleryItem(url: url)).toList();
+        _galleryLoading = false;
+      });
+      return;
+    }
 
+    try {
+      final ps = await PhotoManager.requestPermissionExtend();
+      if (!mounted) return;
+      if (ps.isAuth) {
+        final albums = await PhotoManager.getAssetPathList(type: RequestType.image);
+        if (albums.isNotEmpty) {
+          final recentAssets = await albums.first.getAssetListRange(start: 0, end: 80);
+          if (!mounted) return;
+          setState(() {
+            _galleryItems = recentAssets.map((asset) => GalleryItem(entity: asset)).toList();
+            _hasGalleryPermission = true;
+            _galleryLoading = false;
+          });
+          return;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading device gallery: $e');
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _galleryItems = _mockImages.map((url) => GalleryItem(url: url)).toList();
+      _hasGalleryPermission = false;
+      _galleryLoading = false;
+    });
+  }
+
+  Future<void> _processImageBytesList(
+    List<Future<Uint8List?>> bytesFutures,
+    List<String> names,
+  ) async {
     setState(() {
       _detecting = true;
       _boxes = [];
@@ -62,10 +127,12 @@ class _IngestScreenState extends State<IngestScreen> {
     final repo = context.read<WardrobeRepository>();
     final allBoxes = <DetectedBox>[];
 
-    for (final file in picked) {
-      final bytes = await file.readAsBytes();
+    for (int i = 0; i < bytesFutures.length; i++) {
+      final bytes = await bytesFutures[i];
+      if (bytes == null) continue;
       if (!mounted) return;
-      final boxes = await repo.detectFromImage(bytes, file.name);
+      
+      final boxes = await repo.detectFromImage(bytes, names[i]);
       if (boxes != null) {
         allBoxes.addAll(boxes);
         setState(() => _boxes = List.of(allBoxes));
@@ -75,7 +142,10 @@ class _IngestScreenState extends State<IngestScreen> {
     if (!mounted) return;
 
     if (allBoxes.isEmpty) {
-      setState(() => _detecting = false);
+      setState(() {
+        _detecting = false;
+        _selectedGalleryItems.clear();
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -90,7 +160,34 @@ class _IngestScreenState extends State<IngestScreen> {
     setState(() {
       _detecting = false;
       _boxes = allBoxes;
+      _selectedGalleryItems.clear();
     });
+  }
+
+  Future<void> _pickBulkPhotos() async {
+    if (_detecting) return;
+    final picked = await _picker.pickMultiImage(imageQuality: 85);
+    if (picked.isEmpty) return;
+    _processImageBytesList(
+      picked.map((file) => file.readAsBytes()).toList(),
+      picked.map((file) => file.name).toList(),
+    );
+  }
+
+  Future<void> _pickFromCamera() async {
+    if (_detecting) return;
+    final picked = await _picker.pickImage(source: ImageSource.camera, imageQuality: 85);
+    if (picked == null) return;
+    _processImageBytesList([picked.readAsBytes()], [picked.name]);
+  }
+
+  Future<void> _processSelected() async {
+    if (_detecting || _selectedGalleryItems.isEmpty) return;
+    final selected = List<GalleryItem>.from(_selectedGalleryItems);
+    _processImageBytesList(
+      selected.map((item) => item.getBytes()).toList(),
+      selected.map((item) => item.name).toList(),
+    );
   }
 
   void _deleteBox(int index) {
@@ -187,6 +284,7 @@ class _IngestScreenState extends State<IngestScreen> {
       _reviewIndex = 0;
       _accepted = 0;
       _rejected = 0;
+      _selectedGalleryItems.clear();
     });
 
     if (shouldGoToWardrobe) {
@@ -215,6 +313,21 @@ class _IngestScreenState extends State<IngestScreen> {
               onBulkPhotos: _pickBulkPhotos,
               onDeleteBox: _deleteBox,
               onContinue: _startReview,
+              galleryItems: _galleryItems,
+              selectedGalleryItems: _selectedGalleryItems,
+              galleryLoading: _galleryLoading,
+              hasGalleryPermission: _hasGalleryPermission,
+              onToggleSelect: (item) {
+                setState(() {
+                  if (_selectedGalleryItems.contains(item)) {
+                    _selectedGalleryItems.remove(item);
+                  } else {
+                    _selectedGalleryItems.add(item);
+                  }
+                });
+              },
+              onScanSelected: _processSelected,
+              onPickFromCamera: _pickFromCamera,
             ),
     );
   }
@@ -231,6 +344,13 @@ class _ImportView extends StatelessWidget {
     required this.onBulkPhotos,
     required this.onDeleteBox,
     required this.onContinue,
+    required this.galleryItems,
+    required this.selectedGalleryItems,
+    required this.galleryLoading,
+    required this.hasGalleryPermission,
+    required this.onToggleSelect,
+    required this.onScanSelected,
+    required this.onPickFromCamera,
   });
 
   final bool detecting;
@@ -241,29 +361,32 @@ class _ImportView extends StatelessWidget {
   final void Function(int index) onDeleteBox;
   final VoidCallback onContinue;
 
+  final List<GalleryItem> galleryItems;
+  final List<GalleryItem> selectedGalleryItems;
+  final bool galleryLoading;
+  final bool hasGalleryPermission;
+  final void Function(GalleryItem item) onToggleSelect;
+  final VoidCallback onScanSelected;
+  final VoidCallback onPickFromCamera;
+
   @override
   Widget build(BuildContext context) {
     final showGrid = detecting || boxes.isNotEmpty;
     final placeholderCount = detecting ? 6 : 0;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-      children: [
-        Text(
-          'Add your closet',
-          style: AppTypography.display(
-            fontSize: 30,
-            color: AppColors.ink900,
-            fontWeight: FontWeight.w500,
-            height: 1.1,
+    if (showGrid) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        children: [
+          Text(
+            'Add your closet',
+            style: AppTypography.display(
+              fontSize: 30,
+              color: AppColors.ink900,
+              fontWeight: FontWeight.w500,
+              height: 1.1,
+            ),
           ),
-        ),
-        const SizedBox(height: 20),
-        _BulkPhotosCard(
-          onTap: detecting ? null : onBulkPhotos,
-          busy: detecting,
-        ),
-        if (showGrid) ...[
           const SizedBox(height: 20),
           _StatusLine(
             detecting: detecting,
@@ -276,106 +399,370 @@ class _ImportView extends StatelessWidget {
             placeholderCount: placeholderCount,
             onDeleteBox: fetchingMetadata ? null : onDeleteBox,
           ),
-        ],
-        if (boxes.isNotEmpty && !detecting) ...[
-          const SizedBox(height: 20),
-          FilledButton(
-            onPressed: fetchingMetadata ? null : onContinue,
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.clay500,
-              foregroundColor: AppColors.surface,
-              minimumSize: const Size.fromHeight(48),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
+          if (boxes.isNotEmpty && !detecting) ...[
+            const SizedBox(height: 20),
+            FilledButton(
+              onPressed: fetchingMetadata ? null : onContinue,
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.clay500,
+                foregroundColor: AppColors.surface,
+                minimumSize: const Size.fromHeight(48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
+              child: fetchingMetadata
+                  ? Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.surface,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Analyzing $foundCount item${foundCount == 1 ? '' : 's'}…',
+                          style: AppTypography.ui(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    )
+                  : Text(
+                      'Confirm & review $foundCount item${foundCount == 1 ? '' : 's'}',
+                      style: AppTypography.ui(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
             ),
-            child: fetchingMetadata
-                ? Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppColors.surface,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        'Analyzing $foundCount item${foundCount == 1 ? '' : 's'}…',
-                        style: AppTypography.ui(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  )
-                : Text(
-                    'Confirm & review $foundCount item${foundCount == 1 ? '' : 's'}',
-                    style: AppTypography.ui(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-          ),
+          ],
         ],
-      ],
-    );
-  }
-}
+      );
+    }
 
-class _BulkPhotosCard extends StatelessWidget {
-  const _BulkPhotosCard({required this.onTap, required this.busy});
-
-  final VoidCallback? onTap;
-  final bool busy;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          height: 112,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: busy
-              ? const Center(
-                  child: SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                )
-              : Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+    return Stack(
+      children: [
+        CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(
-                      Icons.photo_outlined,
-                      size: 28,
-                      color: AppColors.ink600,
-                    ),
-                    const SizedBox(height: 10),
                     Text(
-                      'Bulk photos',
+                      'Add your closet',
+                      style: AppTypography.display(
+                        fontSize: 30,
+                        color: AppColors.ink900,
+                        fontWeight: FontWeight.w500,
+                        height: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      hasGalleryPermission
+                          ? 'Select photos from camera roll to scan'
+                          : 'Select demo clothes or upload files to scan',
                       style: AppTypography.ui(
                         fontSize: 14,
-                        fontWeight: FontWeight.w500,
                         color: AppColors.ink600,
                       ),
                     ),
                   ],
                 ),
+              ),
+            ),
+            if (galleryLoading)
+              const SliverFillRemaining(
+                child: Center(
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+                sliver: SliverGrid(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    childAspectRatio: 1,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      if (index == 0) {
+                        return _ActionTile(
+                          icon: Icons.camera_alt_outlined,
+                          label: 'Camera',
+                          onTap: onPickFromCamera,
+                        );
+                      }
+                      if (index == 1) {
+                        return _ActionTile(
+                          icon: Icons.photo_outlined,
+                          label: 'Files',
+                          onTap: onBulkPhotos,
+                        );
+                      }
+
+                      final item = galleryItems[index - 2];
+                      final isSelected = selectedGalleryItems.contains(item);
+                      final selectIndex = selectedGalleryItems.indexOf(item);
+
+                      return _GalleryItemTile(
+                        item: item,
+                        isSelected: isSelected,
+                        selectIndex: selectIndex,
+                        onTap: () => onToggleSelect(item),
+                      );
+                    },
+                    childCount: galleryItems.length + 2,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        if (selectedGalleryItems.isNotEmpty)
+          Positioned(
+            left: 20,
+            right: 20,
+            bottom: 24,
+            child: FilledButton(
+              onPressed: onScanSelected,
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.clay500,
+                foregroundColor: AppColors.surface,
+                minimumSize: const Size.fromHeight(50),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                elevation: 4,
+              ),
+              child: Text(
+                'Scan ${selectedGalleryItems.length} selected photo${selectedGalleryItems.length == 1 ? '' : 's'}',
+                style: AppTypography.ui(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ActionTile extends StatelessWidget {
+  const _ActionTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 26,
+                color: AppColors.clay500,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                style: AppTypography.ui(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.ink600,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+class _GalleryItemTile extends StatelessWidget {
+  const _GalleryItemTile({
+    required this.item,
+    required this.isSelected,
+    required this.selectIndex,
+    required this.onTap,
+  });
+
+  final GalleryItem item;
+  final bool isSelected;
+  final int selectIndex;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.greige.withValues(alpha: 0.5),
+            border: Border.all(
+              color: isSelected ? AppColors.clay500 : AppColors.border,
+              width: isSelected ? 2 : 1,
+            ),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              item.isMock
+                  ? Image.network(
+                      item.url!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return const Center(
+                          child: Icon(Icons.broken_image_outlined, color: AppColors.ink400),
+                        );
+                      },
+                    )
+                  : _AssetThumbnailWidget(entity: item.entity!),
+              if (isSelected)
+                Container(
+                  color: Colors.black.withValues(alpha: 0.15),
+                ),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: isSelected ? AppColors.clay500 : Colors.black.withValues(alpha: 0.3),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppColors.surface, width: 1.5),
+                  ),
+                  child: isSelected
+                      ? Center(
+                          child: Text(
+                            '${selectIndex + 1}',
+                            style: AppTypography.ui(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.surface,
+                            ),
+                          ),
+                        )
+                      : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AssetThumbnailWidget extends StatelessWidget {
+  const _AssetThumbnailWidget({required this.entity});
+
+  final AssetEntity entity;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Uint8List?>(
+      future: entity.thumbnailData,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
+          return Image.memory(
+            snapshot.data!,
+            fit: BoxFit.cover,
+            errorBuilder: (context, error, stackTrace) {
+              return const Center(
+                child: Icon(Icons.broken_image_outlined, color: AppColors.ink400),
+              );
+            },
+          );
+        }
+        return const Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class GalleryItem {
+  final AssetEntity? entity;
+  final String? url;
+
+  GalleryItem({this.entity, this.url});
+
+  bool get isMock => url != null;
+  String get id => isMock ? url! : entity!.id;
+
+  String get name {
+    if (isMock) {
+      return '${url!.split('/').last.split('?').first}.jpg';
+    } else {
+      return entity!.title ?? 'image.jpg';
+    }
+  }
+
+  Future<Uint8List?> getBytes() async {
+    if (isMock) {
+      try {
+        final res = await http.get(Uri.parse(url!));
+        if (res.statusCode == 200) {
+          return res.bodyBytes;
+        }
+      } catch (e) {
+        debugPrint('Error fetching mock bytes: $e');
+      }
+      return null;
+    } else {
+      return await entity!.originBytes;
+    }
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is GalleryItem &&
+          runtimeType == other.runtimeType &&
+          id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
 }
 
 class _StatusLine extends StatelessWidget {

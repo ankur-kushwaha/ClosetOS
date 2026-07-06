@@ -190,19 +190,25 @@ class WardrobeRepository extends ChangeNotifier {
         return null;
       }
 
-      final labelParts = [
-        if (garment.colorName.isNotEmpty) garment.colorName,
-        if (garment.fit.isNotEmpty) garment.fit,
-        if (garment.pattern.isNotEmpty) garment.pattern,
-        if (garment.material.isNotEmpty) garment.material,
-        if (garment.subcategory.isNotEmpty) garment.subcategory,
-        if (garment.category.isNotEmpty) garment.category,
-      ];
-      final detailedLabel = labelParts.isNotEmpty ? labelParts.join(' ') : 'garment';
+      String categoryLabel = 'garment';
+      if (garment.category.isNotEmpty) {
+        final cat = garment.category.toLowerCase().trim();
+        if (cat == 'top') {
+          categoryLabel = 'top wear';
+        } else if (cat == 'bottom') {
+          categoryLabel = 'bottom wear';
+        } else if (cat == 'outerwear') {
+          categoryLabel = 'outerwear';
+        } else if (cat == 'shoes') {
+          categoryLabel = 'shoes';
+        } else {
+          categoryLabel = cat;
+        }
+      }
 
       final result = await _api.normalizeGarment(
         imageB64,
-        detailedLabel,
+        categoryLabel,
         garmentId: garment.id,
       );
       if (result == null) {

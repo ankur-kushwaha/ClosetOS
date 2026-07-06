@@ -29,7 +29,6 @@ class _GarmentDetailSheet extends StatefulWidget {
 }
 
 class _GarmentDetailSheetState extends State<_GarmentDetailSheet> {
-  bool _isEditing = false;
   bool _showNormalized = true;
   bool _saving = false;
   bool _deleting = false;
@@ -38,6 +37,14 @@ class _GarmentDetailSheetState extends State<_GarmentDetailSheet> {
   late String _selectedMaterial;
   late String _selectedPattern;
   late String _selectedFit;
+  late String _selectedCategory;
+
+  static const _categoryOptions = [
+    'Top',
+    'Bottom',
+    'Outerwear',
+    'Shoes',
+  ];
 
   static const _materialOptions = [
     'Wool',
@@ -76,6 +83,7 @@ class _GarmentDetailSheetState extends State<_GarmentDetailSheet> {
     _selectedMaterial = g.material;
     _selectedPattern = g.pattern;
     _selectedFit = g.fit;
+    _selectedCategory = g.category;
     _showNormalized = g.straightenedImagePath.isNotEmpty && g.straightenedImagePath != g.imagePath;
   }
 
@@ -92,17 +100,25 @@ class _GarmentDetailSheetState extends State<_GarmentDetailSheet> {
       material: _selectedMaterial.trim(),
       pattern: _selectedPattern.trim(),
       fit: _selectedFit.trim(),
+      category: _selectedCategory.trim(),
     );
   }
 
-  Future<void> _save() async {
+  Future<void> _saveAttribute({String? material, String? pattern, String? fit, String? category}) async {
     if (_saving || _deleting) return;
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      if (material != null) _selectedMaterial = material;
+      if (pattern != null) _selectedPattern = pattern;
+      if (fit != null) _selectedFit = fit;
+      if (category != null) _selectedCategory = category;
+    });
+
     final repo = context.read<WardrobeRepository>();
     await repo.updateGarment(_buildUpdatedGarment());
+
     if (!mounted) return;
     setState(() => _saving = false);
-    Navigator.pop(context);
     if (repo.lastError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -252,13 +268,32 @@ class _GarmentDetailSheetState extends State<_GarmentDetailSheet> {
                 ),
                 const SizedBox(height: 12),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    CircleIconButton(
-                      icon: _isEditing ? Icons.visibility_outlined : Icons.edit_outlined,
-                      onTap: () => setState(() => _isEditing = !_isEditing),
-                    ),
-                    const SizedBox(width: 12),
+                    if (_saving)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              color: AppColors.clay500,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Saving...',
+                            style: AppTypography.ui(
+                              fontSize: 12,
+                              color: AppColors.ink400,
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      const SizedBox.shrink(),
                     CircleIconButton(
                       icon: Icons.close,
                       onTap: () => Navigator.pop(context),
@@ -266,20 +301,18 @@ class _GarmentDetailSheetState extends State<_GarmentDetailSheet> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                if (!_isEditing) ...[
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.start,
-                    children: [
-                      SegmentedToggle(
-                        showNormalized: _showNormalized,
-                        onChanged: (val) {
-                          setState(() => _showNormalized = val);
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                ],
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [
+                    SegmentedToggle(
+                      showNormalized: _showNormalized,
+                      onChanged: (val) {
+                        setState(() => _showNormalized = val);
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
                 AspectRatio(
                   aspectRatio: 1,
                   child: Container(
@@ -376,121 +409,81 @@ class _GarmentDetailSheetState extends State<_GarmentDetailSheet> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                if (!_isEditing) ...[
-                  if (g.category.isNotEmpty) ...[
+                Text(
+                  g.category.isNotEmpty
+                      ? g.category[0].toUpperCase() + g.category.substring(1)
+                      : 'Garment',
+                  style: AppTypography.display(fontSize: 24, color: AppColors.ink900),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  dateStr,
+                  style: AppTypography.ui(fontSize: 13, color: AppColors.ink400),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    const Icon(Icons.wb_sunny_outlined, size: 16, color: AppColors.ink400),
+                    const SizedBox(width: 8),
                     Text(
-                      g.category.toUpperCase(),
-                      style: AppTypography.ui(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.ink600,
-                        letterSpacing: 0.5,
-                      ),
+                      g.seasons.isNotEmpty
+                          ? 'Best in ${g.seasons.join(" · ")}'
+                          : 'Best in Fall · Winter',
+                      style: AppTypography.ui(fontSize: 14, color: AppColors.ink600),
                     ),
-                    const SizedBox(height: 4),
                   ],
-                  Text(
-                    g.subcategory.isNotEmpty
-                        ? g.subcategory[0].toUpperCase() + g.subcategory.substring(1)
-                        : 'Garment',
-                    style: AppTypography.display(fontSize: 24, color: AppColors.ink900),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    dateStr,
-                    style: AppTypography.ui(fontSize: 13, color: AppColors.ink400),
-                  ),
+                ),
+                const SizedBox(height: 20),
+                const Divider(color: AppColors.border, height: 1),
+                const SizedBox(height: 20),
+                _buildPillSelector(
+                  label: 'Category',
+                  options: _categoryOptions,
+                  selectedValue: _selectedCategory,
+                  onSelected: (val) => _saveAttribute(category: val),
+                ),
+                if (_selectedCategory.toLowerCase().trim() != 'shoes') ...[
                   const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      if (g.subcategory.isNotEmpty) _buildAttributeChip(g.subcategory, highlight: true),
-                      if (g.colorName.isNotEmpty) _buildAttributeChip(g.colorName),
-                      if (g.material.isNotEmpty) _buildAttributeChip(g.material),
-                      if (g.fit.isNotEmpty) _buildAttributeChip(g.fit),
-                      if (g.category.isNotEmpty) _buildAttributeChip(g.category),
-                      if (g.pattern.isNotEmpty) _buildAttributeChip(g.pattern),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  const Divider(color: AppColors.border, height: 1),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      const Icon(Icons.wb_sunny_outlined, size: 16, color: AppColors.ink400),
-                      const SizedBox(width: 8),
-                      Text(
-                        g.seasons.isNotEmpty
-                            ? 'Best in ${g.seasons.join(" · ")}'
-                            : 'Best in Fall · Winter',
-                        style: AppTypography.ui(fontSize: 14, color: AppColors.ink600),
-                      ),
-                    ],
-                  ),
-                ] else ...[
                   _buildPillSelector(
                     label: 'Material',
                     options: _materialOptions,
                     selectedValue: _selectedMaterial,
-                    onSelected: (val) => setState(() => _selectedMaterial = val),
+                    onSelected: (val) => _saveAttribute(material: val),
                   ),
                   const SizedBox(height: 16),
                   _buildPillSelector(
                     label: 'Pattern',
                     options: _patternOptions,
                     selectedValue: _selectedPattern,
-                    onSelected: (val) => setState(() => _selectedPattern = val),
+                    onSelected: (val) => _saveAttribute(pattern: val),
                   ),
                   const SizedBox(height: 16),
                   _buildPillSelector(
                     label: 'Fit',
                     options: _fitOptions,
                     selectedValue: _selectedFit,
-                    onSelected: (val) => setState(() => _selectedFit = val),
-                  ),
-                  const SizedBox(height: 32),
-                  FilledButton(
-                    onPressed: _saving || _deleting ? null : _save,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.clay500,
-                      foregroundColor: AppColors.surface,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: _saving
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: AppColors.surface,
-                            ),
-                          )
-                        : const Text('Save changes'),
-                  ),
-                  const SizedBox(height: 10),
-                  OutlinedButton(
-                    onPressed: _saving || _deleting ? null : _confirmDelete,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.clay500,
-                      side: const BorderSide(color: AppColors.border),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: _deleting
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Remove from closet'),
+                    onSelected: (val) => _saveAttribute(fit: val),
                   ),
                 ],
+                const SizedBox(height: 24),
+                OutlinedButton(
+                  onPressed: _saving || _deleting ? null : _confirmDelete,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.clay500,
+                    side: const BorderSide(color: AppColors.border),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: _deleting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Remove from closet'),
+                ),
               ],
             ),
           );
@@ -499,25 +492,6 @@ class _GarmentDetailSheetState extends State<_GarmentDetailSheet> {
     );
   }
 
-  Widget _buildAttributeChip(String label, {bool highlight = false}) {
-    if (label.isEmpty) return const SizedBox.shrink();
-    final formatted = label[0].toUpperCase() + label.substring(1);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: highlight ? AppColors.clay100 : AppColors.greige.withOpacity(0.4),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        formatted,
-        style: AppTypography.ui(
-          fontSize: 13,
-          fontWeight: FontWeight.w500,
-          color: highlight ? AppColors.clay700 : AppColors.ink900,
-        ),
-      ),
-    );
-  }
 
   Widget _buildPillSelector({
     required String label,
