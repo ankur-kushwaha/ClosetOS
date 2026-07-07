@@ -375,7 +375,7 @@ class _GarmentCard extends StatelessWidget {
                     child: garment.displayImage.isNotEmpty
                         ? GarmentImage(
                             path: garment.displayImage,
-                            fit: BoxFit.cover,
+                            fit: BoxFit.contain,
                           )
                         : const StripeBackground(
                             baseColor: Colors.white,
