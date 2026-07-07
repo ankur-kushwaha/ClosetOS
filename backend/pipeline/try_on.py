@@ -16,9 +16,10 @@ from .orchestrator import map_to_try_on_category, map_to_try_on_subcategory
 
 GARMENT_LAYER_ORDER = {
     "lower_body": 0,
-    "upper_body": 1,
-    "footwear": 2,
-    "accessory": 3,
+    "full_body": 1,
+    "upper_body": 2,
+    "footwear": 3,
+    "accessory": 4,
 }
 
 
@@ -45,6 +46,9 @@ def _decode_image(b64: str) -> tuple:
 
 def _build_try_on_prompt(garments: list) -> str:
     lines = []
+    has_full_body = any(
+        map_to_try_on_category(g.get("category", "")) == "full_body" for g in garments
+    )
     for g in garments:
         cat = map_to_try_on_category(g.get("category", ""))
         sub = map_to_try_on_subcategory(g.get("subcategory", ""))
@@ -52,6 +56,11 @@ def _build_try_on_prompt(garments: list) -> str:
         lines.append(f"- {color} {sub} ({cat})")
 
     garment_list = "\n".join(lines)
+    dress_note = (
+        "IMPORTANT: The outfit contains a dress (full-body garment). "
+        "Do NOT add any separate top or bottom garment. The dress covers both upper and lower body.\n\n"
+        if has_full_body else ""
+    )
     return (
         "You are a virtual try-on assistant. The first image is a selfie of the person — treat their face as sacred "
         "and do NOT alter it in any way (no smoothing, reshaping, recoloring, or any modification). "
@@ -61,8 +70,9 @@ def _build_try_on_prompt(garments: list) -> str:
         "CRITICAL: Do NOT change the color of any garment. Use the exact same color, pattern, texture, and silhouette "
         "as shown in each reference image. Do not recolor, reinterpret, or approximate the garment colors. "
         "Fit each garment naturally on the person's body with correct layering "
-        "(lower body first, then upper body, then outerwear, shoes on feet). "
+        "(lower body first, then full-body dress if present, then upper body, then outerwear, shoes on feet). "
         "Do not add extra clothing, accessories, or decorative elements not present in the references.\n\n"
+        f"{dress_note}"
         f"Outfit to apply:\n{garment_list}"
     )
 

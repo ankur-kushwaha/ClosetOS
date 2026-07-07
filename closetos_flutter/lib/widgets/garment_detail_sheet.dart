@@ -42,6 +42,7 @@ class _GarmentDetailSheetState extends State<_GarmentDetailSheet> {
   static const _categoryOptions = [
     'Top',
     'Bottom',
+    'Dress',
     'Outerwear',
     'Shoes',
   ];
@@ -314,7 +315,7 @@ class _GarmentDetailSheetState extends State<_GarmentDetailSheet> {
                 ),
                 const SizedBox(height: 16),
                 AspectRatio(
-                  aspectRatio: 1,
+                  aspectRatio: 3 / 4,
                   child: Container(
                     decoration: BoxDecoration(
                       color: Colors.white,
@@ -325,13 +326,16 @@ class _GarmentDetailSheetState extends State<_GarmentDetailSheet> {
                     child: Stack(
                       children: [
                         Positioned.fill(
-                          child: Opacity(
-                            opacity: (_showNormalized && !_isNormalized) ? 0.4 : 1.0,
-                            child: GarmentImage(
-                              path: (_isNormalized && _showNormalized)
-                                  ? g.straightenedImagePath
-                                  : g.imagePath,
-                              fit: BoxFit.cover,
+                          child: ColoredBox(
+                            color: Colors.white,
+                            child: Opacity(
+                              opacity: (_showNormalized && !_isNormalized) ? 0.4 : 1.0,
+                              child: GarmentImage(
+                                path: (_isNormalized && _showNormalized)
+                                    ? g.straightenedImagePath
+                                    : g.imagePath,
+                                fit: BoxFit.contain,
+                              ),
                             ),
                           ),
                         ),

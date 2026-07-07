@@ -34,7 +34,7 @@ class WardrobeRepository extends ChangeNotifier {
   bool isSyncing = false;
   String? lastError;
 
-  static const categories = ['All', 'Top', 'Bottom', 'Outerwear', 'Shoes', 'Accessory'];
+  static const categories = ['All', 'Top', 'Bottom', 'Dress', 'Outerwear', 'Shoes', 'Accessory'];
 
   Future<void> init() async {
     garments = _storage.loadGarments();
@@ -447,22 +447,49 @@ class WardrobeRepository extends ChangeNotifier {
     final clean = garments
         .where((g) => g.laundryStatus == LaundryStatus.clean)
         .toList();
-    if (clean.length < 2) return [];
+    if (clean.isEmpty) return [];
 
     final tops = clean.where((g) => g.category == 'Top').toList();
     final bottoms = clean.where((g) => g.category == 'Bottom').toList();
+    final dresses = clean.where((g) => g.category == 'Dress').toList();
     final shoes = clean.where((g) => g.category == 'Shoes').toList();
-    if (tops.isEmpty || bottoms.isEmpty) return [];
+
+    // Need at least one complete outfit type: top+bottom or dress
+    final hasTopBottom = tops.isNotEmpty && bottoms.isNotEmpty;
+    if (!hasTopBottom && dresses.isEmpty) return [];
 
     final results = <Outfit>[];
     final random = Random(tempF.toInt() + occasion.hashCode);
     final reasons = _reasonsForTemp(tempF);
-    final count = min(5, tops.length * bottoms.length);
 
-    for (var i = 0; i < count; i++) {
-      final top = tops[random.nextInt(tops.length)];
-      final bottom = bottoms[random.nextInt(bottoms.length)];
-      final ids = [top.id, bottom.id];
+    // Generate top+bottom outfits
+    if (hasTopBottom) {
+      final tbCount = min(3, tops.length * bottoms.length);
+      for (var i = 0; i < tbCount; i++) {
+        final top = tops[random.nextInt(tops.length)];
+        final bottom = bottoms[random.nextInt(bottoms.length)];
+        final ids = [top.id, bottom.id];
+        if (shoes.isNotEmpty && random.nextBool()) {
+          ids.add(shoes[random.nextInt(shoes.length)].id);
+        }
+        final score = 0.6 + random.nextDouble() * 0.35;
+        results.add(Outfit(
+          id: _uuid.v4(),
+          garmentIds: ids,
+          name: _lookNames[results.length % _lookNames.length],
+          overallScore: score,
+          reason: reasons[results.length % reasons.length],
+          isAiGenerated: true,
+          tags: [occasion],
+        ));
+      }
+    }
+
+    // Generate dress-based outfits (dress only, no top or bottom)
+    final dressCount = min(2, dresses.length);
+    for (var i = 0; i < dressCount; i++) {
+      final dress = dresses[i % dresses.length];
+      final ids = [dress.id];
       if (shoes.isNotEmpty && random.nextBool()) {
         ids.add(shoes[random.nextInt(shoes.length)].id);
       }
@@ -470,13 +497,14 @@ class WardrobeRepository extends ChangeNotifier {
       results.add(Outfit(
         id: _uuid.v4(),
         garmentIds: ids,
-        name: _lookNames[i % _lookNames.length],
+        name: _lookNames[results.length % _lookNames.length],
         overallScore: score,
-        reason: reasons[i % reasons.length],
+        reason: reasons[results.length % reasons.length],
         isAiGenerated: true,
         tags: [occasion],
       ));
     }
+
     results.sort((a, b) => b.overallScore.compareTo(a.overallScore));
     return results;
   }

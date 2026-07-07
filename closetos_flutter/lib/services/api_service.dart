@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
@@ -454,6 +455,15 @@ class ApiService {
             );
             if (imgRes.statusCode == 200) {
               imageBase64 = base64Encode(imgRes.bodyBytes);
+            }
+          } catch (_) {}
+        } else {
+          // Local file path
+          try {
+            final file = File(path);
+            if (await file.exists()) {
+              final bytes = await file.readAsBytes();
+              imageBase64 = base64Encode(bytes);
             }
           } catch (_) {}
         }

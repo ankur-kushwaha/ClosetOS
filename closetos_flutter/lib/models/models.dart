@@ -338,6 +338,9 @@ class ExtractedAttributes {
     if (RegExp(r'jacket|coat|blazer|overcoat|parka|cardigan').hasMatch(text)) {
       return 'Outerwear';
     }
+    if (RegExp(r'dress|gown|frock|maxi|midi|mini dress').hasMatch(text)) {
+      return 'Dress';
+    }
     if (RegExp(r'pants|jeans|trousers|shorts|skirt|leggings').hasMatch(text)) {
       return 'Bottom';
     }

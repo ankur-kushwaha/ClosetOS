@@ -37,6 +37,7 @@ def map_to_try_on_category(ui_category):
     mapping = {
         "Top": "upper_body",
         "Bottom": "lower_body",
+        "Dress": "full_body",
         "Outerwear": "upper_body",
         "Shoes": "footwear",
     }
@@ -65,6 +66,8 @@ def map_to_try_on_subcategory(ui_subcategory):
         return "skirt"
     if "shorts" in sub:
         return "shorts"
+    if any(w in sub for w in ["dress", "gown", "frock", "maxi", "midi"]):
+        return "dress"
     if "sneakers" in sub:
         return "sneakers"
     if any(w in sub for w in ["loafers", "boots", "shoes", "derbies"]):

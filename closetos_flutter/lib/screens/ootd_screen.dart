@@ -338,7 +338,7 @@ class _HeroRender extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(horizontal: 6.0),
                             child: Container(
                               decoration: BoxDecoration(
-                                color: AppColors.surface,
+                                color: Colors.white,
                                 borderRadius: BorderRadius.circular(16),
                                 border: Border.all(color: AppColors.border),
                               ),
@@ -346,9 +346,12 @@ class _HeroRender extends StatelessWidget {
                               child: Stack(
                                 children: [
                                   Positioned.fill(
-                                    child: GarmentImage(
-                                      path: g.displayImage,
-                                      fit: BoxFit.contain,
+                                    child: ColoredBox(
+                                      color: Colors.white,
+                                      child: GarmentImage(
+                                        path: g.displayImage,
+                                        fit: BoxFit.contain,
+                                      ),
                                     ),
                                   ),
                                   Positioned(
