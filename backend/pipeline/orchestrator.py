@@ -192,13 +192,13 @@ def run_digitize_pipeline(
                 f"Normalized {item_label} via {norm_provider}",
             )
 
-            # Thumbnail from normalized image
-            thumb = normalized.copy()
-            thumb.thumbnail((256, 256), Image.Resampling.LANCZOS)
-            canvas = Image.new("RGB", (256, 256), (255, 255, 255))
-            offset = ((256 - thumb.width) // 2, (256 - thumb.height) // 2)
-            canvas.paste(thumb, offset)
-            canvas.save(os.path.join(g_dir, "thumbnail.jpg"), "JPEG", quality=90)
+            # Thumbnail — composite transparent image onto white before JPEG save
+            thumb_rgba = normalized.copy().convert("RGBA")
+            thumb_rgba.thumbnail((256, 256), Image.Resampling.LANCZOS)
+            canvas = Image.new("RGBA", (256, 256), (255, 255, 255, 255))
+            offset = ((256 - thumb_rgba.width) // 2, (256 - thumb_rgba.height) // 2)
+            canvas.paste(thumb_rgba, offset, mask=thumb_rgba)
+            canvas.convert("RGB").save(os.path.join(g_dir, "thumbnail.jpg"), "JPEG", quality=90)
 
             # ── Step 5: FLORENCE_2 — attributes ──
             update_job_step(

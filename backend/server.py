@@ -78,6 +78,17 @@ executor = ThreadPoolExecutor(max_workers=2)
 # Serialize ML inference (FashionCLIP) — one request at a time
 _inference_lock = threading.Lock()
 
+# ── Pre-warm rembg session on startup to eliminate cold-start penalty ─────────
+def _prewarm_rembg():
+    try:
+        from pipeline.normalization import _get_rembg_session
+        _get_rembg_session()
+        print("rembg pre-warm complete")
+    except Exception as e:
+        print(f"rembg pre-warm failed (non-fatal): {e}")
+
+threading.Thread(target=_prewarm_rembg, daemon=True, name="rembg-prewarm").start()
+
 # Determine PyTorch device acceleration
 device = os.getenv("TORCH_DEVICE", "").strip().lower()
 if device not in ("cpu", "cuda", "mps"):
@@ -577,12 +588,12 @@ def yolo_world_finalize(payload: FinalizePayload):
         white_bg_path = os.path.join(g_dir, "white_bg.png")
         image.save(white_bg_path, "PNG")
         
-        # Save thumbnail
-        thumb = image.copy()
+        # Save thumbnail — composite transparent image onto white before JPEG
+        thumb = image.copy().convert("RGBA")
         thumb.thumbnail((256, 256), Image.Resampling.LANCZOS)
-        canvas = Image.new("RGB", (256, 256), (255, 255, 255))
-        canvas.paste(thumb, ((256 - thumb.width) // 2, (256 - thumb.height) // 2))
-        canvas.save(os.path.join(g_dir, "thumbnail.jpg"), "JPEG", quality=90)
+        canvas = Image.new("RGBA", (256, 256), (255, 255, 255, 255))
+        canvas.paste(thumb, ((256 - thumb.width) // 2, (256 - thumb.height) // 2), mask=thumb)
+        canvas.convert("RGB").save(os.path.join(g_dir, "thumbnail.jpg"), "JPEG", quality=90)
         
         # Save actual crop if provided
         if payload.crop_base64:
