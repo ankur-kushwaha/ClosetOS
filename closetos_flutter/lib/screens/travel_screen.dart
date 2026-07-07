@@ -5,6 +5,7 @@ import '../models/models.dart';
 import '../services/wardrobe_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import 'outfit_detail_screen.dart';
 
 class TravelScreen extends StatefulWidget {
   const TravelScreen({super.key});
@@ -156,42 +157,61 @@ class _TravelScreenState extends State<TravelScreen> {
                 .map((id) => garmentsById[id])
                 .whereType<Garment>()
                 .toList();
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'DAY ${day.day}',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      letterSpacing: 2,
-                      color: AppColors.gray400,
-                    ),
+            final dayOutfit = Outfit(
+              id: 'travel_day_${day.day}',
+              garmentIds: day.garmentIds,
+              name: 'Day ${day.day} Look',
+              overallScore: 1.0,
+              reason: day.reason,
+              isAiGenerated: true,
+              tags: ['Travel', _destination.text.trim()],
+            );
+
+            return GestureDetector(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => OutfitDetailScreen(outfit: dayOutfit),
                   ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    height: 72,
-                    child: Row(
-                      children: dayGarments
-                          .map((g) => Expanded(
-                                child: GarmentImage(path: g.displayImage),
-                              ))
-                          .toList(),
-                    ),
-                  ),
-                  if (day.reason.isNotEmpty)
+                );
+              },
+              child: Card(
+                margin: const EdgeInsets.only(bottom: 20),
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    OutfitGarmentsPreview(garments: dayGarments, height: 110),
                     Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Text(
-                        day.reason,
-                        style: const TextStyle(
-                          color: AppColors.gray400,
-                          fontSize: 11,
-                        ),
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'DAY ${day.day}',
+                            style: AppTypography.ui(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 1.5,
+                              color: AppColors.clay500,
+                            ),
+                          ),
+                          if (day.reason.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              day.reason,
+                              style: AppTypography.ui(
+                                color: AppColors.ink600,
+                                fontSize: 12,
+                                height: 1.3,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                ],
+                  ],
+                ),
               ),
             );
           }),

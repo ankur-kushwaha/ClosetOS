@@ -9,6 +9,7 @@ import '../services/weather_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/stripe_background.dart';
+import 'outfit_detail_screen.dart';
 
 class OotdScreen extends StatefulWidget {
   const OotdScreen({super.key, this.onOpenDrawer});
@@ -171,6 +172,14 @@ class _OotdScreenState extends State<OotdScreen>
                       ? const _EmptyState()
                       : FadeTransition(
                           opacity: _revealFade,
+                        child: GestureDetector(
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => OutfitDetailScreen(outfit: outfit),
+                              ),
+                            );
+                          },
                           child: _HeroRender(
                             garments: garments,
                             tryOnPath: _tryOnPath,
@@ -178,6 +187,7 @@ class _OotdScreenState extends State<OotdScreen>
                             onRequestTryOn: () => _loadTryOn(outfit),
                             onClearTryOn: () => setState(() => _tryOnPath = null),
                           ),
+                        ),
                         ),
                 ),
                 if (outfit != null)
@@ -551,13 +561,22 @@ class _BottomPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            outfit.reason,
-            style: AppTypography.display(
-              fontSize: 26,
-              height: 1.2,
-              fontWeight: FontWeight.w500,
-              color: AppColors.ink900,
+          GestureDetector(
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => OutfitDetailScreen(outfit: outfit),
+                ),
+              );
+            },
+            child: Text(
+              outfit.reason,
+              style: AppTypography.display(
+                fontSize: 26,
+                height: 1.2,
+                fontWeight: FontWeight.w500,
+                color: AppColors.ink900,
+              ),
             ),
           ),
           const SizedBox(height: 20),

@@ -754,6 +754,91 @@ class WardrobeRepository extends ChangeNotifier {
     return plan;
   }
 
+  Future<void> toggleFavoriteOutfit(Outfit outfit) async {
+    final idx = outfits.indexWhere((o) => o.id == outfit.id);
+    if (idx >= 0) {
+      final existing = outfits[idx];
+      outfits[idx] = Outfit(
+        id: existing.id,
+        garmentIds: existing.garmentIds,
+        name: existing.name,
+        overallScore: existing.overallScore,
+        reason: existing.reason,
+        isFavorite: !existing.isFavorite,
+        isSaved: existing.isSaved,
+        isAiGenerated: existing.isAiGenerated,
+        tags: existing.tags,
+        wearCount: existing.wearCount,
+        lastWorn: existing.lastWorn,
+      );
+    } else {
+      outfits.add(Outfit(
+        id: outfit.id,
+        garmentIds: outfit.garmentIds,
+        name: outfit.name,
+        overallScore: outfit.overallScore,
+        reason: outfit.reason,
+        isFavorite: true,
+        isSaved: outfit.isSaved,
+        isAiGenerated: outfit.isAiGenerated,
+        tags: outfit.tags,
+        wearCount: outfit.wearCount,
+        lastWorn: outfit.lastWorn,
+      ));
+    }
+    await _storage.saveOutfits(outfits);
+    notifyListeners();
+  }
+
+  Future<void> recordWear(Outfit outfit) async {
+    final idx = outfits.indexWhere((o) => o.id == outfit.id);
+    Outfit updated;
+    if (idx >= 0) {
+      final existing = outfits[idx];
+      updated = Outfit(
+        id: existing.id,
+        garmentIds: existing.garmentIds,
+        name: existing.name,
+        overallScore: existing.overallScore,
+        reason: existing.reason,
+        isFavorite: existing.isFavorite,
+        isSaved: existing.isSaved,
+        isAiGenerated: existing.isAiGenerated,
+        tags: existing.tags,
+        wearCount: existing.wearCount + 1,
+        lastWorn: DateTime.now(),
+      );
+      outfits[idx] = updated;
+    } else {
+      updated = Outfit(
+        id: outfit.id,
+        garmentIds: outfit.garmentIds,
+        name: outfit.name,
+        overallScore: outfit.overallScore,
+        reason: outfit.reason,
+        isFavorite: outfit.isFavorite,
+        isSaved: outfit.isSaved,
+        isAiGenerated: outfit.isAiGenerated,
+        tags: outfit.tags,
+        wearCount: outfit.wearCount + 1,
+        lastWorn: DateTime.now(),
+      );
+      outfits.add(updated);
+    }
+
+    for (final gid in updated.garmentIds) {
+      final gIdx = garments.indexWhere((g) => g.id == gid);
+      if (gIdx >= 0) {
+        final g = garments[gIdx];
+        garments[gIdx] = g.copyWith(wearCount: g.wearCount + 1);
+        await _pushGarmentToCloud(garments[gIdx]);
+      }
+    }
+    await _storage.saveGarments(garments);
+    await _storage.saveOutfits(outfits);
+    notifyListeners();
+  }
+
   Future<WeatherInfo> fetchWeather() => WeatherService.fetch();
 }
 

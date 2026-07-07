@@ -201,3 +201,71 @@ class MinimalDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) => const Divider(height: 1);
 }
+
+class OutfitGarmentsPreview extends StatelessWidget {
+  const OutfitGarmentsPreview({
+    super.key,
+    required this.garments,
+    this.height = 130.0,
+  });
+
+  final List<Garment> garments;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final count = garments.length;
+    
+    // Dynamically adjust box size based on the number of items
+    final double boxSize = count <= 1
+        ? height * 0.75
+        : count == 2
+            ? height * 0.70
+            : count == 3
+                ? height * 0.65
+                : height * 0.58;
+
+    return Container(
+      height: height,
+      width: double.infinity,
+      color: AppColors.greige,
+      alignment: Alignment.center,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const NeverScrollableScrollPhysics(),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: garments.map((g) {
+              return Container(
+                margin: const EdgeInsets.symmetric(horizontal: 6),
+                width: boxSize,
+                height: boxSize,
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.02),
+                      blurRadius: 6,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                clipBehavior: Clip.antiAlias,
+                padding: const EdgeInsets.all(8),
+                child: GarmentImage(
+                  path: g.displayImage,
+                  fit: BoxFit.contain,
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+

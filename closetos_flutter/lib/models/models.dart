@@ -153,6 +153,8 @@ class Outfit {
     this.isSaved = false,
     this.isAiGenerated = false,
     this.tags = const [],
+    this.wearCount = 0,
+    this.lastWorn,
   });
 
   final String id;
@@ -164,6 +166,8 @@ class Outfit {
   final bool isSaved;
   final bool isAiGenerated;
   final List<String> tags;
+  final int wearCount;
+  final DateTime? lastWorn;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -175,6 +179,8 @@ class Outfit {
         'isSaved': isSaved,
         'isAiGenerated': isAiGenerated,
         'tags': tags,
+        'wearCount': wearCount,
+        'lastWorn': lastWorn?.toIso8601String(),
       };
 
   factory Outfit.fromJson(Map<String, dynamic> json) => Outfit(
@@ -192,6 +198,10 @@ class Outfit {
                 ?.map((e) => e.toString())
                 .toList() ??
             const [],
+        wearCount: json['wearCount'] as int? ?? 0,
+        lastWorn: json['lastWorn'] != null
+            ? DateTime.tryParse(json['lastWorn'] as String)
+            : null,
       );
 }
 

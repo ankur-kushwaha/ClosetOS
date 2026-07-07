@@ -5,6 +5,7 @@ import '../models/models.dart';
 import '../services/wardrobe_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import 'outfit_detail_screen.dart';
 
 class LookbookScreen extends StatelessWidget {
   const LookbookScreen({super.key});
@@ -49,62 +50,84 @@ class _OutfitRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        border: Border.all(color: AppColors.gray800),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            height: 100,
-            child: Row(
-              children: garments
-                  .map((g) => Expanded(
-                        child: GarmentImage(path: g.displayImage),
-                      ))
-                  .toList(),
-            ),
+    return GestureDetector(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => OutfitDetailScreen(outfit: outfit),
           ),
-          Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        outfit.name,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+        );
+      },
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 20),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            OutfitGarmentsPreview(garments: garments),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          outfit.name,
+                          style: AppTypography.ui(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.ink900,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        outfit.reason,
-                        style: const TextStyle(
-                          color: AppColors.gray400,
-                          fontSize: 11,
+                        const SizedBox(height: 4),
+                        Text(
+                          outfit.reason,
+                          style: AppTypography.ui(
+                            color: AppColors.ink600,
+                            fontSize: 12,
+                            height: 1.3,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                Text(
-                  '${(outfit.overallScore * 100).round()}%',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                  const SizedBox(width: 16),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.greige,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.auto_awesome,
+                          size: 12,
+                          color: AppColors.clay500,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${(outfit.overallScore * 100).round()}%',
+                          style: AppTypography.ui(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.clay500,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
+
