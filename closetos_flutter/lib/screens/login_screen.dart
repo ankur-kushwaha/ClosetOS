@@ -55,7 +55,7 @@ class _LoginScreenState extends State<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'ClosetOS',
+                  'WardarobeOS',
                   style: AppTypography.label(
                     fontSize: 12,
                     letterSpacing: 3,

@@ -81,7 +81,7 @@ class _ShellScreenState extends State<ShellScreen> {
       appBar: _isFullBleed
           ? null
           : AppBar(
-              title: const Text('ClosetOS'),
+              title: const Text('WardarobeOS'),
               leading: IconButton(
                 icon: const Icon(Icons.menu, size: 20),
                 onPressed: () => _scaffoldKey.currentState?.openDrawer(),

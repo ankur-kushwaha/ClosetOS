@@ -61,7 +61,7 @@ class ClosetOSApp extends StatelessWidget {
         Provider.value(value: storage),
       ],
       child: MaterialApp(
-        title: 'ClosetOS',
+        title: 'WardarobeOS',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
         home: ShellScreen(storage: storage),
