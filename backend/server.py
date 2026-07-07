@@ -892,6 +892,16 @@ def upload_selfie(
 ):
     try:
         data = file.file.read()
+        try:
+            from PIL import Image, ImageOps
+            import io
+            img = Image.open(io.BytesIO(data))
+            img = ImageOps.exif_transpose(img)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            data = buf.getvalue()
+        except Exception as e:
+            print(f"Failed to auto-orient upload_selfie: {e}")
         selfie_url = upload_image(data, user_id, "profile", "selfie.png")
         user = db_manager.get_user_by_id(user_id)
         if not user:

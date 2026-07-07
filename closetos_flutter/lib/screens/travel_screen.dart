@@ -16,8 +16,8 @@ class TravelScreen extends StatefulWidget {
 class _TravelScreenState extends State<TravelScreen> {
   final _destination = TextEditingController();
   int _days = 5;
-  double _tempLow = 55;
-  double _tempHigh = 75;
+  double _tempLow = 13;
+  double _tempHigh = 24;
   String _weather = 'Clear';
   TravelCapsulePlan? _plan;
 
@@ -33,8 +33,8 @@ class _TravelScreenState extends State<TravelScreen> {
     final plan = await repo.planTrip(
       destination: _destination.text.trim(),
       days: _days,
-      tempLowF: _tempLow,
-      tempHighF: _tempHigh,
+      tempLowF: _tempLow * 9 / 5 + 32,
+      tempHighF: _tempHigh * 9 / 5 + 32,
       weather: _weather,
     );
     if (!mounted) return;
@@ -78,18 +78,18 @@ class _TravelScreenState extends State<TravelScreen> {
             ),
           ],
         ),
-        Text('Low temp: ${_tempLow.round()}°F'),
+        Text('Low temp: ${_tempLow.round()}°C'),
         Slider(
           value: _tempLow,
-          min: 20,
-          max: 90,
+          min: -5,
+          max: 35,
           onChanged: (v) => setState(() => _tempLow = v),
         ),
-        Text('High temp: ${_tempHigh.round()}°F'),
+        Text('High temp: ${_tempHigh.round()}°C'),
         Slider(
           value: _tempHigh,
-          min: 20,
-          max: 100,
+          min: -5,
+          max: 45,
           onChanged: (v) => setState(() => _tempHigh = v),
         ),
         DropdownButtonFormField<String>(

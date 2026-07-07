@@ -77,7 +77,7 @@ class WardrobeRepository extends ChangeNotifier {
         final selfieUrl = taste.selfie;
         if (selfieUrl != null && selfieUrl.isNotEmpty) {
           final localSelfiePath = _storage.digitalTwinPath;
-          if (localSelfiePath == null || !File(localSelfiePath).existsSync()) {
+          if (localSelfiePath == null || (!kIsWeb && !File(localSelfiePath).existsSync())) {
             final bytes = await _api.downloadImage(selfieUrl);
             if (bytes != null) {
               final newPath = await _storage.saveImageBytes(bytes, 'selfie');

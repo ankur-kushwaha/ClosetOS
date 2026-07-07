@@ -44,15 +44,35 @@ def _decode_image(b64: str) -> tuple:
     return raw, _mime_for_image(raw)
 
 
+def _transpose_base64_image(b64_str: str) -> str:
+    try:
+        from PIL import Image, ImageOps
+        import io
+        raw = base64.b64decode(b64_str)
+        img = Image.open(io.BytesIO(raw))
+        fmt = img.format or "JPEG"
+        transposed = ImageOps.exif_transpose(img)
+        buf = io.BytesIO()
+        transposed.save(buf, format=fmt)
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
+    except Exception as e:
+        print(f"Failed to transpose image: {e}")
+        return b64_str
+
+
+
 def _build_try_on_prompt(garments: list) -> str:
     lines = []
     has_full_body = any(
         map_to_try_on_category(g.get("category", "")) == "full_body" for g in garments
     )
+    colors_list = []
     for g in garments:
         cat = map_to_try_on_category(g.get("category", ""))
         sub = map_to_try_on_subcategory(g.get("subcategory", ""))
         color = g.get("colorName", "")
+        if color:
+            colors_list.append(color)
         lines.append(f"- {color} {sub} ({cat})")
 
     garment_list = "\n".join(lines)
@@ -61,6 +81,15 @@ def _build_try_on_prompt(garments: list) -> str:
         "Do NOT add any separate top or bottom garment. The dress covers both upper and lower body.\n\n"
         if has_full_body else ""
     )
+
+    color_instructions = ""
+    if colors_list:
+        color_instructions = (
+            f"CRITICAL COLOR ACCURACY REQUIREMENT: The garment colors to apply are {', '.join(colors_list)}. "
+            "You MUST generate the garments in these exact colors. Do not change, lighten, darken, "
+            "or shift the color of the dress/garment under any circumstances. The shade must match the reference image exactly.\n\n"
+        )
+
     return (
         "You are a virtual try-on assistant. The first image is a selfie of the person — treat their face as sacred "
         "and do NOT alter it in any way (no smoothing, reshaping, recoloring, or any modification). "
@@ -72,6 +101,7 @@ def _build_try_on_prompt(garments: list) -> str:
         "Fit each garment naturally on the person's body with correct layering "
         "(lower body first, then full-body dress if present, then upper body, then outerwear, shoes on feet). "
         "Do not add extra clothing, accessories, or decorative elements not present in the references.\n\n"
+        f"{color_instructions}"
         f"{dress_note}"
         f"Outfit to apply:\n{garment_list}"
     )
@@ -284,6 +314,11 @@ def _render_openrouter_try_on(person_image_base64: str, garments: List[dict]) ->
 def render_try_on(person_image_base64: str, garments: List[dict]) -> dict:
     if not garments:
         raise ValueError("At least one garment is required")
+
+    person_image_base64 = _transpose_base64_image(person_image_base64)
+    for g in garments:
+        if g.get("image_base64"):
+            g["image_base64"] = _transpose_base64_image(g["image_base64"])
 
     if TRY_ON_PROVIDER == "openrouter":
         return _render_openrouter_try_on(person_image_base64, garments)

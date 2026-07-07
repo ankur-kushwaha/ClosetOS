@@ -208,8 +208,8 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final day = DateFormat('EEE').format(DateTime.now());
-    final high = weather?.highFahrenheit.round() ?? 61;
-    final low = weather?.lowFahrenheit.round() ?? 48;
+    final high = weather?.highCelsius?.round() ?? 16;
+    final low = weather?.lowCelsius?.round() ?? 9;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
@@ -240,7 +240,7 @@ class _TopBar extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  '$day · $high° → $low°',
+                  '$day · $high°C → $low°C',
                   style: AppTypography.ui(
                     fontSize: 13,
                     fontWeight: FontWeight.w500,

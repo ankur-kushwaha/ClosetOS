@@ -378,7 +378,7 @@ class _GarmentDetailSheetState extends State<_GarmentDetailSheet> {
                                 shadowColor: Colors.black.withOpacity(0.1),
                               ),
                               child: Text(
-                                'Discard',
+                                'Normalize again',
                                 style: AppTypography.ui(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
