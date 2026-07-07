@@ -29,6 +29,7 @@ class WardrobeRepository extends ChangeNotifier {
   bool _finalizeRunning = false;
   Map<String, String> tryOnCache = {};
   String? digitalTwinPath;
+  List<ImportedImage> importedImages = [];
 
   bool isLoading = false;
   bool isSyncing = false;
@@ -42,6 +43,7 @@ class WardrobeRepository extends ChangeNotifier {
     taste = _storage.loadTaste();
     tryOnCache = _storage.loadTryOnCache();
     digitalTwinPath = _storage.digitalTwinPath;
+    importedImages = _storage.loadImportedImages();
     notifyListeners();
   }
 
@@ -836,6 +838,70 @@ class WardrobeRepository extends ChangeNotifier {
     }
     await _storage.saveGarments(garments);
     await _storage.saveOutfits(outfits);
+    notifyListeners();
+  }
+
+  Future<ImportedImage?> importAndScanImage(Uint8List bytes, String filename) async {
+    isLoading = true;
+    notifyListeners();
+
+    try {
+      final boxes = await detectFromImage(bytes, filename);
+      if (boxes == null || boxes.isEmpty) {
+        lastError = lastError ?? 'No garments detected in the image.';
+        return null;
+      }
+
+      final metadata = await fetchMetadataBulk(boxes);
+      final imagePath = await _storage.saveImageBytes(bytes, 'source');
+
+      final garmentsList = <IngestionItem>[];
+      for (var i = 0; i < boxes.length; i++) {
+        final box = boxes[i];
+        final attrs = metadata[i] ?? ExtractedAttributes.fromLabel(box.label);
+        
+        final item = IngestionItem(
+          id: _uuid.v4(),
+          status: 'review',
+          stepLabel: 'Awaiting review',
+          progress: 0.85,
+          label: box.label,
+          cropBase64: box.cropBase64,
+          sourceImageId: box.sourceImageId,
+          attributes: attrs,
+        );
+        garmentsList.add(item);
+      }
+
+      final imported = ImportedImage(
+        id: _uuid.v4(),
+        imagePath: imagePath,
+        dateImported: DateTime.now(),
+        garments: garmentsList,
+      );
+
+      importedImages.insert(0, imported);
+      await _storage.saveImportedImages(importedImages);
+      return imported;
+    } catch (e) {
+      lastError = e.toString();
+      return null;
+    } finally {
+      isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> addImportedGarmentToCloset(ImportedImage image, IngestionItem garment) async {
+    await finalizeIngestion(garment, attributes: garment.attributes);
+    await _storage.saveImportedImages(importedImages);
+    notifyListeners();
+  }
+
+  Future<void> deleteImportedImage(ImportedImage image) async {
+    importedImages.removeWhere((item) => item.id == image.id);
+    await _storage.deleteImageAt(image.imagePath);
+    await _storage.saveImportedImages(importedImages);
     notifyListeners();
   }
 

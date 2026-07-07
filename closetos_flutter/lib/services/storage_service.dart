@@ -136,6 +136,18 @@ class StorageService {
     await _wardrobe?.put('tryon_cache', jsonEncode(cache));
   }
 
+  List<ImportedImage> loadImportedImages() {
+    final raw = _wardrobe?.get('imported_images') as String?;
+    return decodeJsonList(raw, ImportedImage.fromJson);
+  }
+
+  Future<void> saveImportedImages(List<ImportedImage> list) async {
+    await _wardrobe?.put(
+      'imported_images',
+      encodeJsonList(list.map((i) => i.toJson()).toList()),
+    );
+  }
+
   /// Saves base64 image. On mobile writes to disk; on web stores inline b64 ref.
   Future<String> saveImageFromBase64(String base64, String prefix) async {
     if (kIsWeb) {

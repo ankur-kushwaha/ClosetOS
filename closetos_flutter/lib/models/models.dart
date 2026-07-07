@@ -543,6 +543,64 @@ class IngestionItem {
       error: error ?? this.error,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'status': status,
+        'stepLabel': stepLabel,
+        'progress': progress,
+        'label': label,
+        'cropBase64': cropBase64,
+        'normalizedBase64': normalizedBase64,
+        'attributes': attributes?.toJson(),
+        'sourceImageId': sourceImageId,
+        'error': error,
+      };
+
+  factory IngestionItem.fromJson(Map<String, dynamic> json) => IngestionItem(
+        id: json['id'] as String,
+        status: json['status'] as String? ?? 'review',
+        stepLabel: json['stepLabel'] as String? ?? 'Awaiting review',
+        progress: (json['progress'] as num?)?.toDouble() ?? 0.0,
+        label: json['label'] as String?,
+        cropBase64: json['cropBase64'] as String?,
+        normalizedBase64: json['normalizedBase64'] as String?,
+        attributes: json['attributes'] != null
+            ? ExtractedAttributes.fromJson(json['attributes'] as Map<String, dynamic>)
+            : null,
+        sourceImageId: json['sourceImageId'] as String?,
+        error: json['error'] as String?,
+      );
+}
+
+class ImportedImage {
+  ImportedImage({
+    required this.id,
+    required this.imagePath,
+    required this.dateImported,
+    required this.garments,
+  });
+
+  final String id;
+  final String imagePath;
+  final DateTime dateImported;
+  final List<IngestionItem> garments;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'imagePath': imagePath,
+        'dateImported': dateImported.toIso8601String(),
+        'garments': garments.map((e) => e.toJson()).toList(),
+      };
+
+  factory ImportedImage.fromJson(Map<String, dynamic> json) => ImportedImage(
+        id: json['id'] as String,
+        imagePath: json['imagePath'] as String,
+        dateImported: DateTime.parse(json['dateImported'] as String),
+        garments: (json['garments'] as List<dynamic>)
+            .map((e) => IngestionItem.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
 }
 
 String encodeJsonList(List<Map<String, dynamic>> items) => jsonEncode(items);

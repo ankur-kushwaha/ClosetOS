@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -10,10 +11,7 @@ import 'package:provider/provider.dart';
 import '../models/models.dart';
 import '../services/wardrobe_repository.dart';
 import '../theme/app_theme.dart';
-import '../widgets/garment_attr_field.dart';
-import '../widgets/stripe_background.dart';
-
-enum _IngestPhase { import, review }
+import '../widgets/common.dart';
 
 class IngestScreen extends StatefulWidget {
   const IngestScreen({super.key, this.onReviewComplete, this.onOpenDrawer});
@@ -48,23 +46,7 @@ class _IngestScreenState extends State<IngestScreen> {
   bool _galleryLoading = true;
   bool _hasGalleryPermission = false;
 
-  _IngestPhase _phase = _IngestPhase.import;
   bool _detecting = false;
-  bool _fetchingMetadata = false;
-  List<DetectedBox> _boxes = [];
-  List<IngestionItem> _reviewQueue = [];
-  int _reviewIndex = 0;
-  int _accepted = 0;
-  int _rejected = 0;
-
-  int get _foundCount => _boxes.length;
-
-  IngestionItem? get _currentReview =>
-      _reviewIndex < _reviewQueue.length ? _reviewQueue[_reviewIndex] : null;
-
-  IngestionItem? get _nextReview => _reviewIndex + 1 < _reviewQueue.length
-      ? _reviewQueue[_reviewIndex + 1]
-      : null;
 
   @override
   void initState() {
@@ -110,66 +92,62 @@ class _IngestScreenState extends State<IngestScreen> {
     });
   }
 
-  Future<void> _processImageBytesList(
+  Future<void> _scanPhotos(
     List<Future<Uint8List?>> bytesFutures,
     List<String> names,
   ) async {
     setState(() {
       _detecting = true;
-      _boxes = [];
-      _fetchingMetadata = false;
-      _phase = _IngestPhase.import;
-      _reviewQueue = [];
-      _reviewIndex = 0;
-      _accepted = 0;
-      _rejected = 0;
     });
 
     final repo = context.read<WardrobeRepository>();
-    final allBoxes = <DetectedBox>[];
+    ImportedImage? lastImported;
 
     for (int i = 0; i < bytesFutures.length; i++) {
       final bytes = await bytesFutures[i];
       if (bytes == null) continue;
       if (!mounted) return;
-      
-      final boxes = await repo.detectFromImage(bytes, names[i]);
-      if (boxes != null) {
-        allBoxes.addAll(boxes);
-        setState(() => _boxes = List.of(allBoxes));
+
+      final imported = await repo.importAndScanImage(bytes, names[i]);
+      if (imported != null) {
+        lastImported = imported;
       }
     }
 
     if (!mounted) return;
+    setState(() {
+      _detecting = false;
+      _selectedGalleryItems.clear();
+    });
 
-    if (allBoxes.isEmpty) {
-      setState(() {
-        _detecting = false;
-        _selectedGalleryItems.clear();
-      });
+    if (lastImported != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            repo.lastError ?? 'No garments detected.',
+            'Scanned and added to Scanned Photos.',
+            style: AppTypography.ui(color: AppColors.surface),
+          ),
+          backgroundColor: AppColors.clay500,
+        ),
+      );
+      _showGarmentsSheet(context, lastImported);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            repo.lastError ?? 'Scan failed or no garments found.',
             style: AppTypography.ui(color: AppColors.surface),
           ),
         ),
       );
-      return;
     }
-
-    setState(() {
-      _detecting = false;
-      _boxes = allBoxes;
-      _selectedGalleryItems.clear();
-    });
   }
 
   Future<void> _pickBulkPhotos() async {
     if (_detecting) return;
     final picked = await _picker.pickMultiImage(imageQuality: 85);
     if (picked.isEmpty) return;
-    _processImageBytesList(
+    _scanPhotos(
       picked.map((file) => file.readAsBytes()).toList(),
       picked.map((file) => file.name).toList(),
     );
@@ -179,158 +157,100 @@ class _IngestScreenState extends State<IngestScreen> {
     if (_detecting) return;
     final picked = await _picker.pickImage(source: ImageSource.camera, imageQuality: 85);
     if (picked == null) return;
-    _processImageBytesList([picked.readAsBytes()], [picked.name]);
+    _scanPhotos([picked.readAsBytes()], [picked.name]);
   }
 
   Future<void> _processSelected() async {
     if (_detecting || _selectedGalleryItems.isEmpty) return;
     final selected = List<GalleryItem>.from(_selectedGalleryItems);
-    _processImageBytesList(
+    _scanPhotos(
       selected.map((item) => item.getBytes()).toList(),
       selected.map((item) => item.name).toList(),
     );
   }
 
-  void _deleteBox(int index) {
-    if (_fetchingMetadata) return;
-    setState(() => _boxes.removeAt(index));
-  }
-
-  Future<void> _startReview() async {
-    if (_boxes.isEmpty || _fetchingMetadata) return;
-
-    final repo = context.read<WardrobeRepository>();
-    final boxes = List.of(_boxes);
-
-    setState(() => _fetchingMetadata = true);
-
-    final metadata = await repo.fetchMetadataBulk(boxes);
-    if (!mounted) return;
-
-    final items = await Future.wait([
-      for (var i = 0; i < boxes.length; i++)
-        repo.ingestionItemFromBox(
-          boxes[i],
-          attributes: metadata[i],
-        ),
-    ]);
-
-    if (!mounted) return;
-
-    setState(() {
-      _reviewQueue = items;
-      _reviewIndex = 0;
-      _phase = _IngestPhase.review;
-      _boxes = [];
-      _fetchingMetadata = false;
-    });
-  }
-
-  void _acceptCurrent(ExtractedAttributes? editedAttrs) {
-    final item = _currentReview;
-    if (item == null) return;
-
-    final attrs = editedAttrs ??
-        item.attributes ??
-        ExtractedAttributes.fromLabel(item.label ?? 'garment');
-
-    setState(() {
-      _accepted++;
-      _reviewIndex++;
-    });
-
-    context.read<WardrobeRepository>().enqueueFinalize(item, attrs);
-    _checkReviewComplete();
-  }
-
-  void _rejectCurrent() {
-    final item = _currentReview;
-    if (item == null) return;
-
-    context.read<WardrobeRepository>().ingestionQueue
-        .removeWhere((i) => i.id == item.id);
-    setState(() {
-      _rejected++;
-      _reviewIndex++;
-    });
-    _checkReviewComplete();
-  }
-
-  void _checkReviewComplete() {
-    if (_reviewIndex < _reviewQueue.length) return;
-
-    if (!mounted) return;
-
-    final parts = <String>[];
-    if (_accepted > 0) parts.add('$_accepted saving in background');
-    if (_rejected > 0) parts.add('$_rejected skipped');
-
-    if (parts.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${parts.join(', ')}.',
-            style: AppTypography.ui(color: AppColors.surface),
-          ),
-        ),
-      );
-    }
-
-    final shouldGoToWardrobe = _accepted > 0;
-
-    setState(() {
-      _phase = _IngestPhase.import;
-      _boxes = [];
-      _reviewQueue = [];
-      _reviewIndex = 0;
-      _accepted = 0;
-      _rejected = 0;
-      _selectedGalleryItems.clear();
-    });
-
-    if (shouldGoToWardrobe) {
-      widget.onReviewComplete?.call();
-    }
+  void _showGarmentsSheet(BuildContext context, ImportedImage image) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _GarmentsSheet(image: image),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final repo = context.watch<WardrobeRepository>();
     return ColoredBox(
       color: AppColors.canvas,
-      child: _phase == _IngestPhase.review
-          ? _ReviewSweepView(
-              current: _reviewIndex + 1,
-              total: _reviewQueue.length,
-              item: _currentReview!,
-              nextItem: _nextReview,
-              onReject: _rejectCurrent,
-              onAccept: _acceptCurrent,
-            )
-          : _ImportView(
-              detecting: _detecting,
-              fetchingMetadata: _fetchingMetadata,
-              foundCount: _foundCount,
-              boxes: _boxes,
-              onBulkPhotos: _pickBulkPhotos,
-              onDeleteBox: _deleteBox,
-              onContinue: _startReview,
-              galleryItems: _galleryItems,
-              selectedGalleryItems: _selectedGalleryItems,
-              galleryLoading: _galleryLoading,
-              hasGalleryPermission: _hasGalleryPermission,
-              onToggleSelect: (item) {
-                setState(() {
-                  if (_selectedGalleryItems.contains(item)) {
-                    _selectedGalleryItems.remove(item);
-                  } else {
-                    _selectedGalleryItems.add(item);
-                  }
-                });
-              },
-              onScanSelected: _processSelected,
-              onPickFromCamera: _pickFromCamera,
-              onOpenDrawer: widget.onOpenDrawer,
+      child: Stack(
+        children: [
+          _ImportView(
+            detecting: _detecting,
+            importedImages: repo.importedImages,
+            onBulkPhotos: _pickBulkPhotos,
+            galleryItems: _galleryItems,
+            selectedGalleryItems: _selectedGalleryItems,
+            galleryLoading: _galleryLoading,
+            hasGalleryPermission: _hasGalleryPermission,
+            onToggleSelect: (item) {
+              setState(() {
+                if (_selectedGalleryItems.contains(item)) {
+                  _selectedGalleryItems.remove(item);
+                } else {
+                  _selectedGalleryItems.add(item);
+                }
+              });
+            },
+            onScanSelected: _processSelected,
+            onPickFromCamera: _pickFromCamera,
+            onImageClick: (image) => _showGarmentsSheet(context, image),
+            onDeleteImage: (image) => repo.deleteImportedImage(image),
+            onOpenDrawer: widget.onOpenDrawer,
+          ),
+          if (_detecting)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.4),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                  child: Center(
+                    child: Card(
+                      color: AppColors.surface,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const CircularProgressIndicator(color: AppColors.clay500),
+                            const SizedBox(height: 16),
+                            Text(
+                              'Scanning photo...',
+                              style: AppTypography.ui(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.ink900,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Detecting garments & details',
+                              style: AppTypography.ui(
+                                fontSize: 13,
+                                color: AppColors.ink600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
+        ],
+      ),
     );
   }
 }
@@ -340,12 +260,8 @@ class _IngestScreenState extends State<IngestScreen> {
 class _ImportView extends StatelessWidget {
   const _ImportView({
     required this.detecting,
-    required this.fetchingMetadata,
-    required this.foundCount,
-    required this.boxes,
+    required this.importedImages,
     required this.onBulkPhotos,
-    required this.onDeleteBox,
-    required this.onContinue,
     required this.galleryItems,
     required this.selectedGalleryItems,
     required this.galleryLoading,
@@ -353,17 +269,14 @@ class _ImportView extends StatelessWidget {
     required this.onToggleSelect,
     required this.onScanSelected,
     required this.onPickFromCamera,
+    required this.onImageClick,
+    required this.onDeleteImage,
     this.onOpenDrawer,
   });
 
   final bool detecting;
-  final bool fetchingMetadata;
-  final int foundCount;
-  final List<DetectedBox> boxes;
+  final List<ImportedImage> importedImages;
   final VoidCallback onBulkPhotos;
-  final void Function(int index) onDeleteBox;
-  final VoidCallback onContinue;
-
   final List<GalleryItem> galleryItems;
   final List<GalleryItem> selectedGalleryItems;
   final bool galleryLoading;
@@ -371,182 +284,140 @@ class _ImportView extends StatelessWidget {
   final void Function(GalleryItem item) onToggleSelect;
   final VoidCallback onScanSelected;
   final VoidCallback onPickFromCamera;
+  final void Function(ImportedImage image) onImageClick;
+  final void Function(ImportedImage image) onDeleteImage;
   final VoidCallback? onOpenDrawer;
 
   @override
   Widget build(BuildContext context) {
-    final showGrid = detecting || boxes.isNotEmpty;
-    final placeholderCount = detecting ? 6 : 0;
-
-    if (showGrid) {
-      return ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: IconButton(
-              icon: const Icon(Icons.menu, size: 22, color: AppColors.ink900),
-              padding: EdgeInsets.zero,
-              onPressed: onOpenDrawer,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Add your closet',
-            style: AppTypography.display(
-              fontSize: 30,
-              color: AppColors.ink900,
-              fontWeight: FontWeight.w500,
-              height: 1.1,
-            ),
-          ),
-          const SizedBox(height: 20),
-          _StatusLine(
-            detecting: detecting,
-            fetchingMetadata: fetchingMetadata,
-            count: foundCount,
-          ),
-          const SizedBox(height: 16),
-          _ItemGrid(
-            boxes: boxes,
-            placeholderCount: placeholderCount,
-            onDeleteBox: fetchingMetadata ? null : onDeleteBox,
-          ),
-          if (boxes.isNotEmpty && !detecting) ...[
-            const SizedBox(height: 20),
-            FilledButton(
-              onPressed: fetchingMetadata ? null : onContinue,
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.clay500,
-                foregroundColor: AppColors.surface,
-                minimumSize: const Size.fromHeight(48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-              child: fetchingMetadata
-                  ? Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: AppColors.surface,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          'Analyzing $foundCount item${foundCount == 1 ? '' : 's'}…',
-                          style: AppTypography.ui(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    )
-                  : Text(
-                      'Confirm & review $foundCount item${foundCount == 1 ? '' : 's'}',
-                      style: AppTypography.ui(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-            ),
-          ],
-        ],
-      );
-    }
-
     return Stack(
       children: [
         CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-              sliver: SliverToBoxAdapter(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.menu, size: 22, color: AppColors.ink900),
-                      padding: EdgeInsets.zero,
-                      onPressed: onOpenDrawer,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Add your closet',
-                      style: AppTypography.display(
-                        fontSize: 30,
-                        color: AppColors.ink900,
-                        fontWeight: FontWeight.w500,
-                        height: 1.1,
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.menu, size: 22, color: AppColors.ink900),
+                        padding: EdgeInsets.zero,
+                        onPressed: onOpenDrawer,
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      hasGalleryPermission
-                          ? 'Select photos from camera roll to scan'
-                          : 'Select demo clothes or upload files to scan',
-                      style: AppTypography.ui(
-                        fontSize: 14,
-                        color: AppColors.ink600,
+                      const SizedBox(height: 4),
+                      Text(
+                        'Add your closet',
+                        style: AppTypography.display(
+                          fontSize: 30,
+                          color: AppColors.ink900,
+                          fontWeight: FontWeight.w500,
+                          height: 1.1,
+                        ),
                       ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Select photos from camera roll to scan or scan new photos',
+                        style: AppTypography.ui(
+                          fontSize: 14,
+                          color: AppColors.ink600,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      // Camera & Files side-by-side Actions Row
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _ActionTile(
+                              icon: Icons.camera_alt_outlined,
+                              label: 'Camera',
+                              onTap: onPickFromCamera,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _ActionTile(
+                              icon: Icons.photo_library_outlined,
+                              label: 'Files',
+                              onTap: onBulkPhotos,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 28),
+                      // Imported Photos Section Header
+                      Text(
+                        'Imported Photos',
+                        style: AppTypography.display(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.ink900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Click an image to view or add detected garments',
+                        style: AppTypography.ui(
+                          fontSize: 13,
+                          color: AppColors.ink600,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      // Imported Photos list
+                      _ImportedPhotosTray(
+                        images: importedImages,
+                        onImageClick: onImageClick,
+                        onDeleteImage: onDeleteImage,
+                      ),
+                      const SizedBox(height: 28),
+                      // Gallery Section Header
+                      Text(
+                        hasGalleryPermission ? 'Camera Roll' : 'Demo Clothes',
+                        style: AppTypography.display(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.ink900,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                  ),
+                  if (galleryLoading)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 40),
+                      child: Center(
+                        child: CircularProgressIndicator(),
+                      ),
+                    )
+                  else
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 3,
+                        mainAxisSpacing: 8,
+                        crossAxisSpacing: 8,
+                        childAspectRatio: 1,
+                      ),
+                      itemBuilder: (context, index) {
+                        final item = galleryItems[index];
+                        final isSelected = selectedGalleryItems.contains(item);
+                        final selectIndex = selectedGalleryItems.indexOf(item);
+
+                        return _GalleryItemTile(
+                          item: item,
+                          isSelected: isSelected,
+                          selectIndex: selectIndex,
+                          onTap: () => onToggleSelect(item),
+                        );
+                      },
+                      itemCount: galleryItems.length,
                     ),
-                  ],
-                ),
+                ]),
               ),
             ),
-            if (galleryLoading)
-              const SliverFillRemaining(
-                child: Center(
-                  child: CircularProgressIndicator(),
-                ),
-              )
-            else
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
-                sliver: SliverGrid(
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    mainAxisSpacing: 8,
-                    crossAxisSpacing: 8,
-                    childAspectRatio: 1,
-                  ),
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      if (index == 0) {
-                        return _ActionTile(
-                          icon: Icons.camera_alt_outlined,
-                          label: 'Camera',
-                          onTap: onPickFromCamera,
-                        );
-                      }
-                      if (index == 1) {
-                        return _ActionTile(
-                          icon: Icons.photo_outlined,
-                          label: 'Files',
-                          onTap: onBulkPhotos,
-                        );
-                      }
-
-                      final item = galleryItems[index - 2];
-                      final isSelected = selectedGalleryItems.contains(item);
-                      final selectIndex = selectedGalleryItems.indexOf(item);
-
-                      return _GalleryItemTile(
-                        item: item,
-                        isSelected: isSelected,
-                        selectIndex: selectIndex,
-                        onTap: () => onToggleSelect(item),
-                      );
-                    },
-                    childCount: galleryItems.length + 2,
-                  ),
-                ),
-              ),
           ],
         ),
         if (selectedGalleryItems.isNotEmpty)
@@ -599,6 +470,7 @@ class _ActionTile extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
         child: Container(
+          height: 80,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppColors.border),
@@ -784,563 +656,350 @@ class GalleryItem {
   int get hashCode => id.hashCode;
 }
 
-class _StatusLine extends StatelessWidget {
-  const _StatusLine({
-    required this.detecting,
-    required this.fetchingMetadata,
-    required this.count,
+class _ImportedPhotosTray extends StatelessWidget {
+  const _ImportedPhotosTray({
+    required this.images,
+    required this.onImageClick,
+    required this.onDeleteImage,
   });
 
-  final bool detecting;
-  final bool fetchingMetadata;
-  final int count;
+  final List<ImportedImage> images;
+  final void Function(ImportedImage image) onImageClick;
+  final void Function(ImportedImage image) onDeleteImage;
 
   @override
   Widget build(BuildContext context) {
-    final String text;
-    if (detecting) {
-      text = count > 0
-          ? '$count items found, and counting…'
-          : 'Scanning your photos…';
-    } else if (fetchingMetadata) {
-      text = 'Analyzing colors & details for $count item${count == 1 ? '' : 's'}…';
-    } else {
-      text = '$count items found — remove any mistakes, then confirm';
-    }
-
-    return Row(
-      children: [
-        Container(
-          width: 7,
-          height: 7,
-          decoration: const BoxDecoration(
-            color: AppColors.clay500,
-            shape: BoxShape.circle,
-          ),
+    if (images.isEmpty) {
+      return Container(
+        height: 100,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border),
         ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            text,
-            style: AppTypography.ui(
-              fontSize: 13,
-              color: AppColors.ink600,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ItemGrid extends StatelessWidget {
-  const _ItemGrid({
-    required this.boxes,
-    required this.placeholderCount,
-    this.onDeleteBox,
-  });
-
-  final List<DetectedBox> boxes;
-  final int placeholderCount;
-  final void Function(int index)? onDeleteBox;
-
-  @override
-  Widget build(BuildContext context) {
-    final total = boxes.length + placeholderCount;
-
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        mainAxisSpacing: 10,
-        crossAxisSpacing: 10,
-        childAspectRatio: 1,
-      ),
-      itemCount: total,
-      itemBuilder: (_, i) {
-        if (i < boxes.length) {
-          return _GridThumbnail(
-            box: boxes[i],
-            onDelete: onDeleteBox != null ? () => onDeleteBox!(i) : null,
-          );
-        }
-        return const _GridPlaceholder();
-      },
-    );
-  }
-}
-
-class _GridThumbnail extends StatelessWidget {
-  const _GridThumbnail({
-    required this.box,
-    this.onDelete,
-  });
-
-  final DetectedBox box;
-  final VoidCallback? onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          box.cropBase64.isNotEmpty
-              ? Image.memory(
-                  base64Decode(box.cropBase64),
-                  fit: BoxFit.cover,
-                  gaplessPlayback: true,
-                )
-              : const StripeBackground(
-                  baseColor: AppColors.surface,
-                  opacity: 0.35,
-                ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              color: AppColors.ink900.withValues(alpha: 0.65),
-              child: Text(
-                box.label,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.photo_outlined, color: AppColors.ink400, size: 28),
+              const SizedBox(height: 8),
+              Text(
+                'No scanned photos yet',
                 style: AppTypography.ui(
-                  fontSize: 10,
+                  fontSize: 13,
+                  color: AppColors.ink600,
                   fontWeight: FontWeight.w500,
-                  color: AppColors.surface,
                 ),
               ),
-            ),
+            ],
           ),
-          if (onDelete != null)
-            Positioned(
-              top: 4,
-              right: 4,
-              child: Material(
-                color: AppColors.ink900.withValues(alpha: 0.55),
-                shape: const CircleBorder(),
-                child: InkWell(
-                  onTap: onDelete,
-                  customBorder: const CircleBorder(),
-                  child: const Padding(
-                    padding: EdgeInsets.all(4),
-                    child: Icon(
-                      Icons.close,
-                      size: 14,
-                      color: AppColors.surface,
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 120,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: images.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 12),
+        itemBuilder: (context, idx) {
+          final image = images[idx];
+          final total = image.garments.length;
+          final added = image.garments.where((g) => g.status == 'done').length;
+          final allAdded = total > 0 && added == total;
+
+          return GestureDetector(
+            onTap: () => onImageClick(image),
+            child: Stack(
+              children: [
+                Container(
+                  width: 110,
+                  height: 110,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: GarmentImage(
+                    path: image.imagePath,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                // Garments count badge
+                Positioned(
+                  left: 8,
+                  bottom: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: allAdded ? Colors.green : AppColors.ink900.withValues(alpha: 0.75),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      allAdded ? 'Added' : '$added/$total items',
+                      style: AppTypography.ui(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.surface,
+                      ),
                     ),
                   ),
                 ),
+                // Delete button
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: GestureDetector(
+                    onTap: () => onDeleteImage(image),
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: AppColors.ink900.withValues(alpha: 0.6),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.close,
+                        size: 12,
+                        color: AppColors.surface,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _GarmentsSheet extends StatelessWidget {
+  const _GarmentsSheet({required this.image});
+
+  final ImportedImage image;
+
+  @override
+  Widget build(BuildContext context) {
+    final repo = context.watch<WardrobeRepository>();
+    // Look up the image in repository to get the latest reactive updates
+    final currentImage = repo.importedImages.firstWhere(
+      (item) => item.id == image.id,
+      orElse: () => image,
+    );
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.canvas,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 38,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.border,
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Detected Garments',
+                      style: AppTypography.display(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.ink900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${currentImage.garments.length} garments detected in this photo',
+                      style: AppTypography.ui(
+                        fontSize: 13,
+                        color: AppColors.ink600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, color: AppColors.ink600),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Flexible(
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: currentImage.garments.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, idx) {
+                final garment = currentImage.garments[idx];
+                return _GarmentRowItem(
+                  image: currentImage,
+                  garment: garment,
+                );
+              },
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-class _GridPlaceholder extends StatelessWidget {
-  const _GridPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: const StripeBackground(
-        baseColor: AppColors.surface,
-        opacity: 0.35,
-      ),
-    );
-  }
-}
-
-// ─── Review sweep phase ──────────────────────────────────────────────────────
-
-class _ReviewSweepView extends StatefulWidget {
-  const _ReviewSweepView({
-    required this.current,
-    required this.total,
-    required this.item,
-    required this.nextItem,
-    required this.onReject,
-    required this.onAccept,
+class _GarmentRowItem extends StatefulWidget {
+  const _GarmentRowItem({
+    required this.image,
+    required this.garment,
   });
 
-  final int current;
-  final int total;
-  final IngestionItem item;
-  final IngestionItem? nextItem;
-  final VoidCallback onReject;
-  final void Function(ExtractedAttributes? attrs) onAccept;
+  final ImportedImage image;
+  final IngestionItem garment;
 
   @override
-  State<_ReviewSweepView> createState() => _ReviewSweepViewState();
+  State<_GarmentRowItem> createState() => _GarmentRowItemState();
 }
 
-class _ReviewSweepViewState extends State<_ReviewSweepView> {
-  final _cardKey = GlobalKey<_ReviewCardState>();
+class _GarmentRowItemState extends State<_GarmentRowItem> {
+  bool _localLoading = false;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    final repo = context.read<WardrobeRepository>();
+    final isAdded = widget.garment.status == 'done';
+    final isProcessing = widget.garment.status == 'processing' || _localLoading;
+
+    final name = widget.garment.attributes?.subcategory.isNotEmpty == true
+        ? widget.garment.attributes!.subcategory
+        : (widget.garment.label ?? 'Garment');
+    final category = widget.garment.attributes?.category ?? 'Top';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(
-                  'Review your sweep',
-                  style: AppTypography.display(
-                    fontSize: 30,
-                    color: AppColors.ink900,
-                    fontWeight: FontWeight.w500,
-                    height: 1.1,
-                  ),
-                ),
-              ),
-              Text(
-                '${widget.current} / ${widget.total}',
-                style: AppTypography.ui(
-                  fontSize: 13,
-                  color: AppColors.ink600,
-                ),
-              ),
-            ],
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: SizedBox(
+              width: 64,
+              height: 64,
+              child: widget.garment.cropBase64?.isNotEmpty == true
+                  ? Image.memory(
+                      base64Decode(widget.garment.cropBase64!),
+                      fit: BoxFit.cover,
+                    )
+                  : Container(color: AppColors.border),
+            ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(width: 16),
           Expanded(
-            child: Stack(
-              alignment: Alignment.center,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (widget.nextItem != null)
-                  Positioned(
-                    top: 12,
-                    left: 16,
-                    right: 16,
-                    bottom: 0,
-                    child: Transform.scale(
-                      scale: 0.96,
-                      child: _ReviewCard(
-                        key: ValueKey(widget.nextItem!.id),
-                        item: widget.nextItem!,
-                        interactive: false,
-                      ),
-                    ),
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.ui(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.ink900,
                   ),
-                Positioned.fill(
-                  child: _ReviewCard(
-                    key: _cardKey,
-                    item: widget.item,
-                    interactive: true,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  category,
+                  style: AppTypography.ui(
+                    fontSize: 12,
+                    color: AppColors.ink600,
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _SweepActionButton(
-                icon: Icons.close,
-                filled: false,
-                onPressed: widget.onReject,
-              ),
-              const SizedBox(width: 28),
-              _SweepActionButton(
-                icon: Icons.check,
-                filled: true,
-                onPressed: () {
-                  widget.onAccept(_cardKey.currentState?.editedAttributes);
-                },
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ReviewCard extends StatefulWidget {
-  const _ReviewCard({
-    super.key,
-    required this.item,
-    this.interactive = true,
-  });
-
-  final IngestionItem item;
-  final bool interactive;
-
-  @override
-  State<_ReviewCard> createState() => _ReviewCardState();
-}
-
-class _ReviewCardState extends State<_ReviewCard> {
-  late TextEditingController _subcategoryCtrl;
-  late TextEditingController _categoryCtrl;
-  late TextEditingController _colorCtrl;
-  late TextEditingController _materialCtrl;
-  late TextEditingController _patternCtrl;
-  late TextEditingController _fitCtrl;
-
-  ExtractedAttributes get _baseAttrs =>
-      widget.item.attributes ??
-      ExtractedAttributes.fromLabel(widget.item.label ?? 'Garment');
-
-  ExtractedAttributes? get editedAttributes => _baseAttrs.copyWith(
-        subcategory: _subcategoryCtrl.text.trim(),
-        category: _categoryCtrl.text.trim(),
-        colorName: _colorCtrl.text.trim(),
-        material: _materialCtrl.text.trim(),
-        pattern: _patternCtrl.text.trim(),
-        fit: _fitCtrl.text.trim(),
-      );
-
-  void _syncControllers(ExtractedAttributes attrs) {
-    _subcategoryCtrl.text = attrs.subcategory.isNotEmpty
-        ? attrs.subcategory
-        : (widget.item.label ?? '');
-    _categoryCtrl.text = attrs.category;
-    _colorCtrl.text = attrs.colorName;
-    _materialCtrl.text = attrs.material;
-    _patternCtrl.text = attrs.pattern;
-    _fitCtrl.text = attrs.fit;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    final attrs = _baseAttrs;
-    _subcategoryCtrl = TextEditingController();
-    _categoryCtrl = TextEditingController();
-    _colorCtrl = TextEditingController();
-    _materialCtrl = TextEditingController();
-    _patternCtrl = TextEditingController();
-    _fitCtrl = TextEditingController();
-    _syncControllers(attrs);
-  }
-
-  @override
-  void didUpdateWidget(covariant _ReviewCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.item.id != widget.item.id) {
-      _syncControllers(_baseAttrs);
-    }
-  }
-
-  @override
-  void dispose() {
-    _subcategoryCtrl.dispose();
-    _categoryCtrl.dispose();
-    _colorCtrl.dispose();
-    _materialCtrl.dispose();
-    _patternCtrl.dispose();
-    _fitCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final imageB64 = widget.item.cropBase64 ?? '';
-    final label = widget.item.label ?? 'Garment';
-
-    return Opacity(
-      opacity: widget.interactive ? 1 : 0.55,
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: AppColors.border),
-          boxShadow: widget.interactive
-              ? [
-                  BoxShadow(
-                    color: AppColors.ink900.withValues(alpha: 0.06),
-                    blurRadius: 24,
-                    offset: const Offset(0, 8),
+          const SizedBox(width: 12),
+          if (isAdded)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.check_circle_rounded, color: Colors.green, size: 20),
+                const SizedBox(width: 4),
+                Text(
+                  'Added',
+                  style: AppTypography.ui(
+                    fontSize: 14,
+                    color: Colors.green,
+                    fontWeight: FontWeight.w600,
                   ),
-                ]
-              : null,
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              flex: 10,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (imageB64.isNotEmpty)
-                    Image.memory(
-                      base64Decode(imageB64),
-                      fit: BoxFit.contain,
-                      gaplessPlayback: true,
-                    )
-                  else
-                    const StripeBackground(
-                      baseColor: AppColors.surface,
-                      opacity: 0.35,
-                    ),
-                  Positioned(
-                    left: 12,
-                    top: 12,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.ink900.withValues(alpha: 0.7),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        label,
-                        style: AppTypography.ui(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: AppColors.surface,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+                ),
+              ],
+            )
+          else if (isProcessing)
+            const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.clay500,
+              ),
+            )
+          else
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.clay500,
+                foregroundColor: AppColors.surface,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: () async {
+                setState(() => _localLoading = true);
+                try {
+                  await repo.addImportedGarmentToCloset(widget.image, widget.garment);
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed to add: $e')),
+                    );
+                  }
+                } finally {
+                  if (mounted) {
+                    setState(() => _localLoading = false);
+                  }
+                }
+              },
+              child: Text(
+                'Add',
+                style: AppTypography.ui(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.surface,
+                ),
               ),
             ),
-            if (widget.interactive)
-              Flexible(
-                flex: 9,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      GarmentAttrField(
-                        label: 'Name',
-                        controller: _subcategoryCtrl,
-                        hint: 'e.g. Crew neck tee',
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: GarmentAttrField(
-                              label: 'Category',
-                              controller: _categoryCtrl,
-                              hint: 'Top',
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: GarmentAttrField(
-                              label: 'Color',
-                              controller: _colorCtrl,
-                              hint: 'Navy',
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: GarmentAttrField(
-                              label: 'Material',
-                              controller: _materialCtrl,
-                              hint: 'Cotton',
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: GarmentAttrField(
-                              label: 'Pattern',
-                              controller: _patternCtrl,
-                              hint: 'Solid',
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      GarmentAttrField(
-                        label: 'Fit',
-                        controller: _fitCtrl,
-                        hint: 'Regular',
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-                child: Text(
-                  _baseAttrs.subcategory.isNotEmpty
-                      ? _baseAttrs.subcategory
-                      : label,
-                  style: AppTypography.ui(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.ink900,
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SweepActionButton extends StatelessWidget {
-  const _SweepActionButton({
-    required this.icon,
-    required this.filled,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final bool filled;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: filled ? AppColors.clay500 : AppColors.surface,
-      shape: const CircleBorder(),
-      child: InkWell(
-        onTap: onPressed,
-        customBorder: const CircleBorder(),
-        child: Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: filled ? null : Border.all(color: AppColors.border),
-          ),
-          child: Icon(
-            icon,
-            size: 24,
-            color: filled ? AppColors.surface : AppColors.clay500,
-          ),
-        ),
+        ],
       ),
     );
   }
