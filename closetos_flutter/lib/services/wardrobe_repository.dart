@@ -34,6 +34,7 @@ class WardrobeRepository extends ChangeNotifier {
   bool isLoading = false;
   bool isSyncing = false;
   String? lastError;
+  bool enableTryOn = true;
 
   static const categories = ['All', 'Top', 'Bottom', 'Dress', 'Outerwear', 'Shoes', 'Accessory'];
 
@@ -44,6 +45,16 @@ class WardrobeRepository extends ChangeNotifier {
     tryOnCache = _storage.loadTryOnCache();
     digitalTwinPath = _storage.digitalTwinPath;
     importedImages = _storage.loadImportedImages();
+    
+    try {
+      final config = await _api.getRootConfig();
+      if (config != null) {
+        enableTryOn = config['enable_tryon'] == true || config['enable_tryon'] == 'true';
+      }
+    } catch (_) {
+      // Default to true if request fails
+    }
+    
     notifyListeners();
   }
 

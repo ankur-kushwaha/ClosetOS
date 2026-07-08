@@ -537,23 +537,25 @@ class _OutfitDetailScreenState extends State<OutfitDetailScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // Virtual Try-on Button
-                  OutlinedButton.icon(
-                    onPressed: _tryOnLoading ? null : _runTryOn,
-                    icon: const Icon(Icons.auto_awesome, size: 18, color: accentColor),
-                    label: Text(
-                      'Virtual Try-on',
-                      style: AppTypography.ui(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: accentColor,
+                  if (repo.enableTryOn) ...[
+                    OutlinedButton.icon(
+                      onPressed: _tryOnLoading ? null : _runTryOn,
+                      icon: const Icon(Icons.auto_awesome, size: 18, color: accentColor),
+                      label: Text(
+                        'Virtual Try-on',
+                        style: AppTypography.ui(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: accentColor,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: accentColor, width: 1.5),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                     ),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: accentColor, width: 1.5),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
+                    const SizedBox(height: 12),
+                  ],
 
                   // Wear this today primary button
                   Material(

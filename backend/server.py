@@ -35,6 +35,7 @@ from pipeline.config import (
     NORMALIZATION_PROVIDER,
     MIN_DETECTION_CONFIDENCE,
     TRY_ON_MODEL,
+    ENABLE_TRYON,
 )
 
 
@@ -154,6 +155,7 @@ def read_root():
         "active_detector": DETECTION_MODEL,
         "normalization_provider": NORMALIZATION_PROVIDER,
         "try_on_model": TRY_ON_MODEL,
+        "enable_tryon": ENABLE_TRYON,
         "database": db_manager.db_type,
         "storage": GARMENTS_DIR,
         "health_check": "/health/check",
@@ -752,6 +754,8 @@ def health_check():
 @app.post("/try-on/render")
 def try_on_render(payload: TryOnRequest):
     try:
+        if not ENABLE_TRYON:
+            raise HTTPException(status_code=400, detail="Try-on feature is disabled")
         if not payload.person_image_base64:
             raise HTTPException(status_code=400, detail="person_image_base64 is required")
         if not payload.garments:

@@ -288,6 +288,9 @@ class _HeroRender extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final repo = Provider.of<WardrobeRepository>(context);
+    final enableTryOn = repo.enableTryOn;
+
     return Padding(
       padding: const EdgeInsets.only(left: 24, right: 24, top: 12),
       child: Stack(
@@ -352,125 +355,78 @@ class _HeroRender extends StatelessWidget {
                   ..addAll(accessoryGarments.map((g) => g.id));
                 final leftovers = garments.where((g) => !matchedIds.contains(g.id)).toList();
 
+                final leftItems = [...topOuterDress, ...shoesGarments];
+                final rightItems = [...bottomGarments, ...accessoryGarments, ...leftovers];
+
+                double getAspectRatioForCategory(String category) {
+                  switch (category.toLowerCase()) {
+                    case 'dress':
+                      return 0.65;
+                    case 'bottom':
+                      return 0.7;
+                    case 'outerwear':
+                      return 0.8;
+                    case 'top':
+                      return 1.0;
+                    case 'shoes':
+                    case 'accessory':
+                    default:
+                      return 1.0;
+                  }
+                }
+
                 Widget buildGarmentCard(Garment g) {
-                  return Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: ColoredBox(
-                            color: Colors.white,
-                            child: GarmentImage(
-                              path: g.displayImage,
-                              fit: BoxFit.contain,
-                            ),
+                  final double aspectRatio = getAspectRatioForCategory(g.category);
+                  return AspectRatio(
+                    aspectRatio: aspectRatio,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppColors.border),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.04),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
                           ),
-                        ),
-                        Positioned(
-                          bottom: 8,
-                          left: 8,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: AppColors.canvas.withValues(alpha: 0.8),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              g.category,
-                              style: AppTypography.ui(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.ink900,
+                        ],
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: ColoredBox(
+                              color: Colors.white,
+                              child: Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: GarmentImage(
+                                  path: g.displayImage,
+                                  fit: BoxFit.contain,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final List<Widget> rows = [];
-
-                if (topOuterDress.isNotEmpty) {
-                  rows.add(
-                    Expanded(
-                      child: Row(
-                        children: topOuterDress.map((g) => Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 6.0),
-                            child: buildGarmentCard(g),
+                          Positioned(
+                            bottom: 8,
+                            left: 8,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: AppColors.canvas.withValues(alpha: 0.85),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                g.category,
+                                style: AppTypography.ui(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.ink900,
+                                ),
+                              ),
+                            ),
                           ),
-                        )).toList(),
-                      ),
-                    ),
-                  );
-                }
-
-                if (bottomGarments.isNotEmpty) {
-                  if (rows.isNotEmpty) rows.add(const SizedBox(height: 12));
-                  rows.add(
-                    Expanded(
-                      child: Row(
-                        children: bottomGarments.map((g) => Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 6.0),
-                            child: buildGarmentCard(g),
-                          ),
-                        )).toList(),
-                      ),
-                    ),
-                  );
-                }
-
-                if (shoesGarments.isNotEmpty) {
-                  if (rows.isNotEmpty) rows.add(const SizedBox(height: 12));
-                  rows.add(
-                    Expanded(
-                      child: Row(
-                        children: shoesGarments.map((g) => Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 6.0),
-                            child: buildGarmentCard(g),
-                          ),
-                        )).toList(),
-                      ),
-                    ),
-                  );
-                }
-
-                if (accessoryGarments.isNotEmpty) {
-                  if (rows.isNotEmpty) rows.add(const SizedBox(height: 12));
-                  rows.add(
-                    Expanded(
-                      child: Row(
-                        children: accessoryGarments.map((g) => Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 6.0),
-                            child: buildGarmentCard(g),
-                          ),
-                        )).toList(),
-                      ),
-                    ),
-                  );
-                }
-
-                if (leftovers.isNotEmpty) {
-                  if (rows.isNotEmpty) rows.add(const SizedBox(height: 12));
-                  rows.add(
-                    Expanded(
-                      child: Row(
-                        children: leftovers.map((g) => Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 6.0),
-                            child: buildGarmentCard(g),
-                          ),
-                        )).toList(),
+                        ],
                       ),
                     ),
                   );
@@ -481,38 +437,64 @@ class _HeroRender extends StatelessWidget {
                     Expanded(
                       child: Padding(
                         padding: const EdgeInsets.only(bottom: 12),
-                        child: Column(
-                          children: rows,
-                        ),
-                      ),
-                    ),
-                    Material(
-                      color: AppColors.clay500,
-                      borderRadius: BorderRadius.circular(24),
-                      child: InkWell(
-                        onTap: onRequestTryOn,
-                        borderRadius: BorderRadius.circular(24),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        child: SingleChildScrollView(
                           child: Row(
-                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Icon(Icons.auto_awesome, color: AppColors.surface, size: 16),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Virtual Try-on',
-                                style: AppTypography.ui(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.surface,
+                              if (leftItems.isNotEmpty)
+                                Expanded(
+                                  child: Column(
+                                    children: leftItems.map((g) => Padding(
+                                      padding: const EdgeInsets.only(bottom: 12.0),
+                                      child: buildGarmentCard(g),
+                                    )).toList(),
+                                  ),
                                 ),
-                              ),
+                              if (leftItems.isNotEmpty && rightItems.isNotEmpty)
+                                const SizedBox(width: 12),
+                              if (rightItems.isNotEmpty)
+                                Expanded(
+                                  child: Column(
+                                    children: rightItems.map((g) => Padding(
+                                      padding: const EdgeInsets.only(bottom: 12.0),
+                                      child: buildGarmentCard(g),
+                                    )).toList(),
+                                  ),
+                                ),
                             ],
                           ),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    if (enableTryOn) ...[
+                      Material(
+                        color: AppColors.clay500,
+                        borderRadius: BorderRadius.circular(24),
+                        child: InkWell(
+                          onTap: onRequestTryOn,
+                          borderRadius: BorderRadius.circular(24),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.auto_awesome, color: AppColors.surface, size: 16),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Virtual Try-on',
+                                  style: AppTypography.ui(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.surface,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                   ],
                 );
               },

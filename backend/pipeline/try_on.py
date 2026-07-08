@@ -93,7 +93,7 @@ def _build_try_on_prompt(garments: list) -> str:
     return (
         "You are a virtual try-on assistant. The first image is a selfie of the person — treat their face as sacred "
         "and do NOT alter it in any way (no smoothing, reshaping, recoloring, or any modification). "
-        "Skin tone must remain identical to the selfie. Pose can be changed. Use transparent background"
+        "Skin tone must remain identical to the selfie. Pose can be changed. Use white background"
         "You MAY subtly restyle the hair to complement the outfit (e.g. adjust style or volume), but do not change the hair color.\n\n"
         "Replace the person's current clothing with the garments shown in the reference images. "
         "CRITICAL: Do NOT change the color of any garment. Use the exact same color, pattern, texture, and silhouette "

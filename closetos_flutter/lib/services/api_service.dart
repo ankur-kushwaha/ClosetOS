@@ -39,6 +39,16 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>?> getRootConfig() async {
+    try {
+      final res = await _client.get(_uri('/')).timeout(const Duration(seconds: 3));
+      if (res.statusCode >= 200 && res.statusCode < 400) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   Future<AuthResult?> signup({
     required String name,
     required String email,
