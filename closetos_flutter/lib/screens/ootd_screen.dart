@@ -9,6 +9,7 @@ import '../services/weather_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/stripe_background.dart';
+import '../widgets/why_this_today.dart';
 import 'outfit_detail_screen.dart';
 
 class OotdScreen extends StatefulWidget {
@@ -195,6 +196,7 @@ class _OotdScreenState extends State<OotdScreen>
                     outfit: outfit,
                     alternatives: alternatives,
                     repo: repo,
+                    weather: _weather,
                     onWearToday: () => _wearToday(outfit),
                     onUndo: _undoSelection,
                     onShuffle: () => _shuffleOutfit(outfits),
@@ -522,6 +524,7 @@ class _BottomPanel extends StatelessWidget {
     required this.outfit,
     required this.alternatives,
     required this.repo,
+    this.weather,
     required this.onWearToday,
     required this.onUndo,
     required this.onShuffle,
@@ -531,10 +534,79 @@ class _BottomPanel extends StatelessWidget {
   final Outfit outfit;
   final List<MapEntry<int, Outfit>> alternatives;
   final WardrobeRepository repo;
+  final WeatherInfo? weather;
   final VoidCallback onWearToday;
   final VoidCallback onUndo;
   final VoidCallback onShuffle;
   final ValueChanged<int> onSelectAlternative;
+
+  void _showWhyThisToday(BuildContext context) {
+    final garments = repo.garmentsForOutfit(outfit);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.canvas,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.7,
+          minChildSize: 0.5,
+          maxChildSize: 0.95,
+          expand: false,
+          builder: (context, scrollController) {
+            return SingleChildScrollView(
+              controller: scrollController,
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.ink400.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Why this today?',
+                          style: AppTypography.display(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.ink900,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: AppColors.ink900),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  WhyThisTodayDetails(
+                    outfit: outfit,
+                    weather: weather,
+                    garments: garments,
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -544,21 +616,35 @@ class _BottomPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           GestureDetector(
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => OutfitDetailScreen(outfit: outfit),
+            onTap: () => _showWhyThisToday(context),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  outfit.reason,
+                  style: AppTypography.display(
+                    fontSize: 26,
+                    height: 1.2,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.ink900,
+                  ),
                 ),
-              );
-            },
-            child: Text(
-              outfit.reason,
-              style: AppTypography.display(
-                fontSize: 26,
-                height: 1.2,
-                fontWeight: FontWeight.w500,
-                color: AppColors.ink900,
-              ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.wb_sunny_outlined, size: 14, color: AppColors.clay500),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Why this today?',
+                      style: AppTypography.ui(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.clay500,
+                      ).copyWith(decoration: TextDecoration.underline),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 20),

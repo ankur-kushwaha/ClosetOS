@@ -5,9 +5,11 @@ import 'package:provider/provider.dart';
 
 import '../models/models.dart';
 import '../services/wardrobe_repository.dart';
+import '../services/weather_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/stripe_background.dart';
+import '../widgets/why_this_today.dart';
 
 class OutfitDetailScreen extends StatefulWidget {
   const OutfitDetailScreen({super.key, required this.outfit});
@@ -23,6 +25,7 @@ class _OutfitDetailScreenState extends State<OutfitDetailScreen> {
   int? _expandedGarmentIndex; // Track which piece is expanded for swapping
   String? _tryOnPath;
   bool _tryOnLoading = false;
+  WeatherInfo? _weather;
 
   @override
   void initState() {
@@ -31,6 +34,16 @@ class _OutfitDetailScreenState extends State<OutfitDetailScreen> {
     // Load cached try-on if any
     final repo = context.read<WardrobeRepository>();
     _tryOnPath = repo.tryOnCache[_currentOutfit.id];
+    _loadWeather();
+  }
+
+  Future<void> _loadWeather() async {
+    final w = await WeatherService.fetch();
+    if (mounted) {
+      setState(() {
+        _weather = w;
+      });
+    }
   }
 
   Future<void> _runTryOn() async {
@@ -286,6 +299,23 @@ class _OutfitDetailScreenState extends State<OutfitDetailScreen> {
                             ),
                           ),
                         ],
+                        const SizedBox(height: 28),
+                        Text(
+                          'WHY THIS TODAY?',
+                          style: AppTypography.label(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.ink400,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        WhyThisTodayDetails(
+                          outfit: _currentOutfit,
+                          weather: _weather,
+                          garments: garments,
+                          showPieceInsights: false,
+                        ),
                         const SizedBox(height: 32),
                         Text(
                           'PIECES',
